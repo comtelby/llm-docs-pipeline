@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ title }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f9; }
+        .container-fluid { max-width: 1400px; }
+        .panel-box { background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .terminal-window { 
+            background-color: #1e1e1e; color: #00ff00; padding: 15px; 
+            border-radius: 5px; height: 300px; overflow-y: auto; 
+            font-family: 'Consolas', monospace; font-size: 14px;
+        }
+        .file-btn-group { display: flex; gap: 10px; flex-wrap: wrap; }
+        .file-btn { flex: 1 1 200px; }
+        .path-display { background: #f8f9fa; border: 1px solid #dee2e6; padding: 10px; border-radius: 4px; font-size: 0.85rem; word-break: break-all; }
+        .msg-user { color: #ffffff; }
+        .msg-bot { color: #ffff00; }
+        .msg-error { color: #ff5555; }
+        .msg-system { color: #00ff00; }
+        .category-header { 
+            background: #f8f9fa; padding: 8px 12px; margin: 10px 0 5px 0; 
+            border-radius: 4px; font-weight: bold; cursor: pointer;
+        }
+        .category-content { padding-left: 20px; }
+        .file-item { 
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 5px 10px; border-bottom: 1px solid #eee;
+        }
+        .file-item:hover { background: #f8f9fa; }
+        #genReportBtn:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+        }
+        #genReportBtn:not(:disabled) {
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.4); }
+            70% { box-shadow: 0 0 0 10px rgba(40, 167, 69, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0); }
+        }
+    </style>
+</head>
+<body>
+<div class="container-fluid py-4">
+    <h2 class="mb-4">{{ title }}</h2>
+
+    <!-- Row 1: Диалоговое окно -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="panel-box">
+                <h4>Диалоговое окно: iqBot Prompt</h4>
+                <p class="text-muted">
+                    Сформулируйте задачу для генерации отчёта. Например:<br>
+                    <em>"Проанализируй ИТ инфраструктуру Заказчика. Особое внимание удели сетевым устройствам Cisco и серверам HP. 
+                    Используй шаблон audit_template.md"</em>
+                </p>
+                <div class="row g-3">
+                    <div class="col-md-8">
+                        <textarea id="chatPrompt" class="form-control" rows="3" 
+                            placeholder="Введите промпт с требованиями к отчёту..."></textarea>
+                    </div>
+                    <div class="col-md-4 d-flex align-items-end gap-2">
+                        <select id="chatModel" class="form-select" style="flex-grow: 1;">
+                            <option value="qwen2.5-coder:7b">Qwen 2.5 Coder (7B)</option>
+                        </select>
+                        <button id="sendChatBtn" class="btn btn-primary">Отправить</button>
+                    </div>
+                </div>
+                <div class="mt-3 terminal-window" id="chatOutput">
+                    <span class="msg-system">> Добро пожаловать в систему аудита ИТ-инфраструктуры!</span><br>
+                    <span class="msg-system">> 1. Сформулируйте задачу в этом чате</span><br>
+                    <span class="msg-system">> 2. Загрузите необходимые данные через кнопки ниже</span><br>
+                    <span class="msg-system">> 3. Нажмите "Сгенерировать отчёт"</span><br>
+                    <span class="msg-system">> _</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Row 2: Загрузка данных и управление -->
+    <div class="row g-4">
+        <!-- Левая колонка: Загрузка данных -->
+        <div class="col-md-6">
+            <div class="panel-box">
+                <h4>Поле загрузки данных</h4>
+                <p class="text-muted small">Загрузите необходимые данные для аудита</p>
+                
+                <div class="file-btn-group mb-3">
+                    <button onclick="triggerUpload('inventory')" class="btn btn-outline-success file-btn">
+                        📊 Справочные данные<br><small>(inventory)</small>
+                    </button>
+                    <button onclick="triggerUpload('configs')" class="btn btn-outline-warning file-btn">
+                        ⚙️ Файлы конфигураций<br><small>(configs)</small>
+                    </button>
+                </div>
+                <div class="file-btn-group mb-3">
+                    <button onclick="triggerUpload('screenshots')" class="btn btn-outline-info file-btn">
+                        📸 Скриншоты<br><small>(screenshots)</small>
+                    </button>
+                    <button onclick="triggerUpload('samples')" class="btn btn-outline-secondary file-btn">
+                        📄 Шаблоны отчётов<br><small>(samples)</small>
+                    </button>
+                </div>
+                
+                <input type="file" id="hiddenFileInput" style="display: none;" multiple>
+                
+                <hr>
+                
+                <h5>Подготовка к новому проекту</h5>
+                <p class="text-muted small">
+                    Очищает временные данные (конфиги и скриншоты) для аудита нового заказчика.<br>
+                    Справочные данные и шаблоны сохраняются.
+                </p>
+                <button id="clearTempBtn" class="btn btn-outline-danger w-100">
+                    🗑️ Очистить временные данные (для нового проекта)
+                </button>
+            </div>
+        </div>
+
+        <!-- Правая колонка: Статистика и генерация -->
+        <div class="col-md-6">
+            <div class="panel-box">
+                <h4>Пути хранения данных</h4>
+                <div class="mb-2">
+                    <label class="form-label small text-muted">📊 Inventory / Docs (накопительные)</label>
+                    <div class="path-display">/app/inventory</div>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small text-muted">⚙️ Configs (временные)</label>
+                    <div class="path-display">/app/input/configs</div>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small text-muted">📸 Screenshots (временные)</label>
+                    <div class="path-display">/app/input/screenshots</div>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small text-muted">📄 Samples / Templates (накопительные)</label>
+                    <div class="path-display">/app/input/samples</div>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small text-muted">📋 Reports Output</label>
+                    <div class="path-display">
+                        /app/output
+                        <a href="/reports-page" class="float-end btn btn-sm btn-outline-primary" target="_blank">Просмотреть →</a>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel-box">
+                <h4>Загруженные данные</h4>
+                <div id="filesContainer">
+                    <p class="text-muted text-center">Загрузка...</p>
+                </div>
+                
+                <hr>
+                
+                <button id="genReportBtn" class="btn btn-success w-100 btn-lg" disabled>
+                    📋 Сгенерировать отчёт по аудиту<br>
+                    <small style="font-size:0.8em;opacity:0.7">⚠️ Введите и отправьте промпт в чате</small>
+                </button>
+                <div id="reportStatus" class="mt-2" style="display: none;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+{% raw %}
+<script>
+    const API_BASE = '';
+    let currentUploadCategory = '';
+    // Флаг, что промпт был отправлен
+    window.lastPromptSent = false;
+
+    // Загрузка моделей
+    async function loadModels() {
+        try {
+            const res = await fetch(API_BASE + '/models');
+            const data = await res.json();
+            const select = document.getElementById('chatModel');
+            
+            if (data.models && data.models.length > 0) {
+                select.innerHTML = '';
+                data.models.forEach(model => {
+                    const option = document.createElement('option');
+                    option.value = model;
+                    option.textContent = model;
+                    if (model.includes('qwen') || model.includes('coder')) option.selected = true;
+                    select.appendChild(option);
+                });
+            }
+        } catch (err) {
+            console.warn('Не удалось загрузить модели');
+        }
+    }
+
+    // Загрузка списка файлов по категориям
+    async function loadFiles() {
+        try {
+            const res = await fetch(API_BASE + '/files');
+            const data = await res.json();
+            const container = document.getElementById('filesContainer');
+            
+            const categoryNames = {
+                'inventory': '📊 Справочные данные (inventory)',
+                'configs': '⚙️ Файлы конфигураций',
+                'screenshots': '📸 Скриншоты',
+                'samples': '📄 Шаблоны отчётов',
+                'reports': '📋 Сгенерированные отчёты'
+            };
+            
+            let html = '';
+            let hasData = false;
+            
+            for (const [category, files] of Object.entries(data)) {
+                if (files && files.length > 0) {
+                    hasData = true;
+                    html += `<div class="category-header">${categoryNames[category] || category} (${files.length} файлов)</div>`;
+                    html += '<div class="category-content">';
+                    
+                    files.forEach(f => {
+                        html += `
+                            <div class="file-item">
+                                <span>📎 ${f.name} <small class="text-muted">(${(f.size_bytes / 1024).toFixed(1)} KB)</small></span>
+                                <button class="btn btn-sm btn-outline-danger" onclick="deleteFile('${category}', '${f.name}')">✕</button>
+                            </div>
+                        `;
+                    });
+                    
+                    html += '</div>';
+                }
+            }
+            
+            if (!hasData) {
+                html = '<p class="text-muted text-center">Нет загруженных данных. Загрузите файлы через кнопки слева.</p>';
+            }
+            
+            container.innerHTML = html;
+            
+            // Проверяем, можно ли генерировать отчёт
+            checkReportReady(data);
+            
+        } catch (err) {
+            console.error('Ошибка загрузки файлов:', err);
+            document.getElementById('filesContainer').innerHTML = 
+                '<p class="text-danger text-center">Ошибка загрузки данных</p>';
+        }
+    }
+
+    function checkReportReady(data) {
+        // Проверяем наличие данных
+        const hasData = data && (
+            (data.inventory && data.inventory.length > 0) || 
+            (data.configs && data.configs.length > 0) ||
+            (data.screenshots && data.screenshots.length > 0)
+        );
+        
+        // Проверяем, есть ли текст в поле ИЛИ был ли отправлен промпт
+        const chatPrompt = document.getElementById('chatPrompt').value.trim();
+        const hasPrompt = chatPrompt.length > 0 || window.lastPromptSent === true;
+        
+        const btn = document.getElementById('genReportBtn');
+        
+        if (!hasData) {
+            btn.disabled = true;
+            btn.innerHTML = '📋 Сгенерировать отчёт по аудиту<br><small style="font-size:0.8em;opacity:0.7">⚠️ Загрузите данные через кнопки слева</small>';
+            btn.title = 'Нет загруженных данных';
+        } else if (!hasPrompt) {
+            btn.disabled = true;
+            btn.innerHTML = '📋 Сгенерировать отчёт по аудиту<br><small style="font-size:0.8em;opacity:0.7">⚠️ Введите и отправьте промпт в чате</small>';
+            btn.title = 'Сначала отправьте промпт в чат';
+        } else {
+            btn.disabled = false;
+            btn.innerHTML = '📋 Сгенерировать отчёт по аудиту';
+            btn.title = 'Нажмите для генерации отчёта';
+        }
+    }
+
+    // Триггер загрузки файлов
+    function triggerUpload(category) {
+        currentUploadCategory = category;
+        const input = document.getElementById('hiddenFileInput');
+        input.accept = category === 'screenshots' ? 'image/*' : '*/*';
+        input.click();
+    }
+
+    // Обработка выбора файлов
+    document.getElementById('hiddenFileInput').addEventListener('change', async function() {
+        const files = this.files;
+        if (files.length === 0) return;
+        
+        for (let file of files) {
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            try {
+                const res = await fetch(`${API_BASE}/upload/${currentUploadCategory}`, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!res.ok) {
+                    const err = await res.json();
+                    alert(`Ошибка загрузки ${file.name}: ${err.detail}`);
+                }
+            } catch (err) {
+                alert(`Ошибка сети при загрузке ${file.name}`);
+            }
+        }
+        
+        // Очищаем input
+        this.value = '';
+        // Обновляем список файлов
+        loadFiles();
+    });
+
+    // Удаление файла
+    async function deleteFile(category, filename) {
+        if (!confirm(`Удалить файл "${filename}" из категории ${category}?`)) return;
+        
+        try {
+            const res = await fetch(`${API_BASE}/files/${category}/${encodeURIComponent(filename)}`, {
+                method: 'DELETE'
+            });
+            
+            if (res.ok) {
+                loadFiles();
+            } else {
+                const data = await res.json();
+                alert('Ошибка: ' + (data.detail || 'Unknown error'));
+            }
+        } catch (err) {
+            alert('Ошибка сети при удалении');
+        }
+    }
+
+    // Очистка временных данных
+    document.getElementById('clearTempBtn').addEventListener('click', async () => {
+        if (!confirm('Очистить ВСЕ файлы конфигураций и скриншоты?\n\nСправочные данные и шаблоны сохранятся. Это действие нельзя отменить.')) return;
+        
+        const btn = document.getElementById('clearTempBtn');
+        btn.disabled = true;
+        btn.innerText = 'Очистка...';
+        
+        try {
+            const res = await fetch(API_BASE + '/clear-temp', { method: 'POST' });
+            const data = await res.json();
+            
+            if (res.ok) {
+                alert(`✅ Готово!\nУдалено конфигов: ${data.cleared.configs}\nУдалено скриншотов: ${data.cleared.screenshots}\n\nМожно загружать данные нового проекта.`);
+                loadFiles();
+            } else {
+                alert('Ошибка: ' + (data.detail || 'Unknown error'));
+            }
+        } catch (err) {
+            alert('Ошибка сети');
+        } finally {
+            btn.disabled = false;
+            btn.innerText = '🗑️ Очистить временные данные (для нового проекта)';
+        }
+    });
+
+    // Отправка промпта в чат
+    document.getElementById('sendChatBtn').addEventListener('click', async () => {
+        const prompt = document.getElementById('chatPrompt').value.trim();
+        const model = document.getElementById('chatModel').value;
+        const output = document.getElementById('chatOutput');
+        
+        if (!prompt) return;
+
+        // Добавляем сообщение пользователя
+        output.innerHTML += `<span class="msg-user">> Вы: ${prompt}</span><br>`;
+        output.scrollTop = output.scrollHeight;
+        
+        // Очищаем поле
+        document.getElementById('chatPrompt').value = '';
+        
+        // Индикатор ожидания
+        const waitingId = 'waiting_' + Date.now();
+        output.innerHTML += `<span id="${waitingId}" class="msg-system">> ⏳ Обработка запроса...</span><br>`;
+        output.scrollTop = output.scrollHeight;
+
+        try {
+            const res = await fetch(API_BASE + '/chat', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                body: `prompt=${encodeURIComponent(prompt)}&model=${encodeURIComponent(model)}`
+            });
+            
+            const waitingEl = document.getElementById(waitingId);
+            if (waitingEl) waitingEl.remove();
+            
+            const data = await res.json();
+            
+            if (res.ok && data.response) {
+                output.innerHTML += `<span class="msg-bot">> Бот: ${data.response}</span><br>`;
+                if (data.prompt_saved) {
+                    output.innerHTML += `<span class="msg-system">> ✅ Промпт сохранён для генерации отчёта</span><br>`;
+                    // Сохраняем флаг, что промпт был отправлен
+                    window.lastPromptSent = true;
+                    // Обновляем состояние кнопки
+                    loadFiles();
+                }
+            } else {
+                output.innerHTML += `<span class="msg-error">> ❌ Ошибка: ${data.error || 'Нет ответа'}</span><br>`;
+            }
+        } catch (err) {
+            const waitingEl = document.getElementById(waitingId);
+            if (waitingEl) waitingEl.remove();
+            output.innerHTML += `<span class="msg-error">> ❌ Ошибка соединения</span><br>`;
+        }
+        
+        output.scrollTop = output.scrollHeight;
+    });
+
+    // Отправка по Enter
+    document.getElementById('chatPrompt').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            document.getElementById('sendChatBtn').click();
+        }
+    });
+
+    // Отслеживание ввода промпта для активации кнопки
+    document.getElementById('chatPrompt').addEventListener('input', function() {
+        loadFiles(); // Обновит статус кнопки
+    });
+
+    // Генерация отчёта
+    document.getElementById('genReportBtn').addEventListener('click', async () => {
+        const btn = document.getElementById('genReportBtn');
+        const statusDiv = document.getElementById('reportStatus');
+        const output = document.getElementById('chatOutput');
+        
+        if (btn.disabled) return;
+        
+        btn.disabled = true;
+        btn.innerText = '⏳ Генерация отчёта... (это может занять несколько минут)';
+        statusDiv.style.display = 'none';
+        
+        output.innerHTML += `<span class="msg-system">> 📋 Начинаю генерацию отчёта...</span><br>`;
+        output.scrollTop = output.scrollHeight;
+
+        try {
+            const res = await fetch(API_BASE + '/generate-report', {
+                method: 'POST'
+            });
+            
+            const data = await res.json();
+            
+            if (res.ok) {
+                statusDiv.innerHTML = `
+                    <div class="alert alert-success">
+                        <strong>✅ Отчёт сгенерирован!</strong><br>
+                        <strong>Файл:</strong> ${data.report_file}<br>
+                        <hr>
+                        <div class="d-flex gap-2">
+                            <a href="/download/${encodeURIComponent(data.report_file)}" class="btn btn-success btn-sm" target="_blank">
+                                📥 Скачать отчёт
+                            </a>
+                            <a href="/reports-page" class="btn btn-outline-primary btn-sm" target="_blank">
+                                👁️ Просмотреть все отчёты
+                            </a>
+                        </div>
+                        <hr>
+                        <strong>Предпросмотр:</strong>
+                        <pre class="mt-2" style="max-height: 200px; overflow-y: auto;">${data.content_preview}</pre>
+                    </div>
+                `;
+                output.innerHTML += `<span class="msg-system">> ✅ Отчёт сохранён: ${data.report_file}</span><br>`;
+                
+                // Сбрасываем флаг после генерации (для нового отчёта нужен новый промпт)
+                window.lastPromptSent = false;
+                
+            } else {
+                statusDiv.innerHTML = `
+                    <div class="alert alert-danger">
+                        <strong>❌ Ошибка:</strong> ${data.detail || 'Неизвестная ошибка'}
+                    </div>
+                `;
+                output.innerHTML += `<span class="msg-error">> ❌ Ошибка генерации: ${data.detail}</span><br>`;
+            }
+            
+            statusDiv.style.display = 'block';
+            output.scrollTop = output.scrollHeight;
+            loadFiles();
+            
+        } catch (err) {
+            statusDiv.innerHTML = `
+                <div class="alert alert-danger">
+                    <strong>❌ Ошибка сети:</strong> ${err.message}
+                </div>
+            `;
+            statusDiv.style.display = 'block';
+            output.innerHTML += `<span class="msg-error">> ❌ Ошибка соединения</span><br>`;
+            output.scrollTop = output.scrollHeight;
+        } finally {
+            btn.disabled = false;
+            loadFiles(); // Обновит состояние кнопки
+        }
+    });
+
+    // Инициализация
+    loadModels();
+    loadFiles();
+</script>
+{% endraw %}
+
+</body>
+</html>

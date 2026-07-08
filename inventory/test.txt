@@ -1,0 +1,6 @@
+Сервер: netlab-test
+IP: 10.0.0.1
+OS: Ubuntu 22.04
+CPU: 4 vCPUs
+RAM: 16GB
+Disk: 120GB SSD
