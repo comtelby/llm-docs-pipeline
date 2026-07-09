@@ -2,7 +2,6 @@ import re
 import subprocess
 import logging
 from pathlib import Path
-from typing import Optional
 
 from src.eol import lookup_eol
 from src.models import DeviceInfo

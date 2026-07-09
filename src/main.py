@@ -2,7 +2,6 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.config import TEMPLATES_DIR
 from src.database import init_db, seed_eol_to_inventories
 from src.routes.ui import router as ui_router
 from src.routes.files import router as files_router

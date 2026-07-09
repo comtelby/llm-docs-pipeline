@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
-from pathlib import Path
 
 from src.config import TEMPLATES_DIR
 from jinja2 import Environment, FileSystemLoader, select_autoescape

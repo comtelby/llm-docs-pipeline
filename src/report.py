@@ -2,16 +2,14 @@ import asyncio
 import re
 import logging
 from datetime import datetime
-from pathlib import Path
-from typing import Optional
+
 
 import aiofiles
 
-from src.config import CONFIGS_DIR, SCREENSHOTS_DIR, SAMPLES_DIR, INVENTORY_DIR, OUTPUT_DIR, OLLAMA_DEFAULT_MODEL
+from src.config import CONFIGS_DIR, SCREENSHOTS_DIR, SAMPLES_DIR, INVENTORY_DIR, OUTPUT_DIR
 from src.parser import (
-    parse_device_config, extract_text_from_image, extract_text_from_docx,
-    extract_text_from_doc, extract_text_from_rtf, extract_text_from_xlsx,
-    extract_text_from_xls, extract_text_from_file, read_text_file
+    parse_device_config, extract_text_from_image,
+    extract_text_from_file
 )
 from src.llm import query_ollama
 from src.database import save_audit_history, find_inventory_by_model
@@ -378,7 +376,7 @@ async def generate_report(prompt: str) -> dict:
             report_sections.append(f"```\n{inventory_text[:5000]}\n```\n\n")
 
         try:
-            conclusion_prompt = f"Напиши итоговое заключение по аудиту ИТ-инфраструктуры (3-5 предложений на русском):"
+            conclusion_prompt = "Напиши итоговое заключение по аудиту ИТ-инфраструктуры (3-5 предложений на русском):"
             conclusion_prompt += f" всего устройств {len(devices)}, EOSL {len(eol_critical)}, End-of-Sale {len(eol_warning)}, "
             conclusion_prompt += f"устройства без AAA: {len(no_aaa)}, без NTP: {len(no_ntp)}, без ACL: {len(no_acl)}, "
             conclusion_prompt += f"ключевые: {', '.join(d.hostname for d in devices[:5])}"

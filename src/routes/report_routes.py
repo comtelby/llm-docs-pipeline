@@ -1,7 +1,6 @@
 import markdown
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, PlainTextResponse, HTMLResponse
-from pathlib import Path
 
 import aiofiles
 

@@ -5,7 +5,7 @@ from pathlib import Path
 from datetime import datetime
 from fastapi import UploadFile, HTTPException
 
-from src.config import UPLOAD_DIR, INVENTORY_DIR, CONFIGS_DIR, SCREENSHOTS_DIR, SAMPLES_DIR, OUTPUT_DIR
+from src.config import INVENTORY_DIR, CONFIGS_DIR, SCREENSHOTS_DIR, SAMPLES_DIR, OUTPUT_DIR
 
 CATEGORY_DIR_MAP = {
     "inventory": INVENTORY_DIR,
