@@ -29,8 +29,12 @@ if %ERRORLEVEL% neq 0 (
 :: Переход в директорию проекта
 cd /d "%~dp0"
 
+:: Остановка старых контейнеров
+echo [1/4] Остановка старых контейнеров...
+docker-compose down 2>nul
+
 :: Сборка и запуск контейнеров
-echo [1/3] Сборка и запуск контейнеров...
+echo [2/4] Сборка и запуск контейнеров...
 docker-compose up -d --build
 if %ERRORLEVEL% neq 0 (
     echo [ОШИБКА] Не удалось запустить контейнеры.
@@ -39,14 +43,14 @@ if %ERRORLEVEL% neq 0 (
 )
 
 :: Ожидание готовности Ollama
-echo [2/3] Ожидание Ollama...
+echo [3/4] Ожидание Ollama...
 :wait_ollama
 timeout /t 5 /nobreak >nul
 curl -s http://localhost:11434/api/tags >nul 2>&1
 if %ERRORLEVEL% neq 0 goto wait_ollama
 
 :: Проверка наличия модели
-echo [3/3] Проверка модели LLM...
+echo [4/4] Проверка модели LLM...
 curl -s http://localhost:11434/api/tags | findstr "qwen2.5-coder" >nul
 if %ERRORLEVEL% neq 0 (
     echo Модель qwen2.5-coder:7b не найдена. Загрузка...
