@@ -331,13 +331,17 @@ async def generate_report(prompt: str) -> dict:
 
         report_sections.append("\n## 4. АНАЛИЗ ЖИЗНЕННОГО ЦИКЛА\n\n")
         if eol_critical:
-            report_sections.append("### Критическое (EOSL)\n| Устройство | Модель | EOL | Риск |\n|---|---|---|---|\n")
+            table = "### Критическое (EOSL)\n| Устройство | Модель | EOL | Риск |\n|---|---|---|---|\n"
             for d in eol_critical:
-                report_sections.append(f"| {d.hostname} | {d.model} | {d.eol_info.get('eol', '?')} | {d.eol_info.get('note', '')} |\n")
+                table += f"| {d.hostname} | {d.model} | {d.eol_info.get('eol', '?')} | {d.eol_info.get('note', '')} |\n"
+            report_sections.append(table)
         if eol_warning:
-            report_sections.append("### End-of-Sale\n| Устройство | Модель | EOL |\n|---|---|---|\n")
+            table = "### End-of-Sale\n| Устройство | Модель | EOL |\n|---|---|---|\n"
             for d in eol_warning:
-                report_sections.append(f"| {d.hostname} | {d.model} | {d.eol_info.get('eol', '?')} |\n")
+                table += f"| {d.hostname} | {d.model} | {d.eol_info.get('eol', '?')} |\n"
+            report_sections.append(table)
+        if not eol_critical and not eol_warning:
+            report_sections.append("Актуальное оборудование, критических позиций EOL не выявлено.\n")
 
         report_sections.append("\n## 5. ПРОБЛЕМЫ БЕЗОПАСНОСТИ\n\n")
         if no_aaa:
