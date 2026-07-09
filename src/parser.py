@@ -199,36 +199,46 @@ def extract_text_from_doc(doc_path: Path) -> str:
     return ""
 
 
-def _detect_rtf_encoding(raw_bytes: bytes) -> str:
-    """Определяет кодировку RTF по заголовку \\ansicpgNNNN, иначе cp1251."""
+def _detect_rtf_codepage(raw_bytes: bytes) -> int:
+    """Определяет кодовую страницу RTF по \\ansicpgN или \\fcharsetN."""
     try:
-        header = raw_bytes[:200].decode('latin-1', errors='replace')
+        header = raw_bytes[:500].decode('latin-1', errors='replace')
         m = re.search(r'\\ansicpg(\d+)', header)
         if m:
-            cp = int(m.group(1))
-            return f'cp{cp}'
+            return int(m.group(1))
+        m = re.search(r'\\fcharset(\d+)', header)
+        if m:
+            charset = int(m.group(1))
+            charset_to_cp = {204: 1251, 238: 1251, 177: 1251, 162: 1251}
+            if charset in charset_to_cp:
+                return charset_to_cp[charset]
+        if re.search(r"\\'([cdef][0-9a-f]|e[0-9a-f])", header, re.IGNORECASE):
+            return 1251
     except Exception:
         pass
-    return 'cp1251'
+    return 1251
+
+
+def _decode_rtf_escapes(raw_text: str, encoding: str) -> str:
+    """Заменяет \\'xx на реальные символы в указанной кодировке."""
+    def replace_escape(m):
+        hex_val = m.group(1)
+        return bytes.fromhex(hex_val).decode(encoding, errors='replace')
+    return re.sub(r"\\'([0-9a-fA-F]{2})", replace_escape, raw_text)
 
 
 def extract_text_from_rtf(rtf_path: Path) -> str:
     try:
         raw_bytes = rtf_path.read_bytes()
-        encoding = _detect_rtf_encoding(raw_bytes)
+        cp = _detect_rtf_codepage(raw_bytes)
+        encoding = f'cp{cp}'
 
-        for enc in [encoding, 'cp1251', 'utf-8', 'latin-1']:
-            try:
-                raw_text = raw_bytes.decode(enc, errors='replace')
-                break
-            except (UnicodeDecodeError, LookupError):
-                continue
-        else:
-            raw_text = raw_bytes.decode('latin-1', errors='replace')
+        raw_text = raw_bytes.decode('latin-1', errors='replace')
+        decoded_text = _decode_rtf_escapes(raw_text, encoding)
 
         try:
             from striprtf.striprtf import rtf_to_text
-            result = rtf_to_text(raw_text)
+            result = rtf_to_text(decoded_text)
             if len(result.strip()) > 100:
                 logger.info(f"RTF(striprtf): {rtf_path.name} ({len(result)} chars)")
                 return result.strip()
@@ -237,11 +247,10 @@ def extract_text_from_rtf(rtf_path: Path) -> str:
         except Exception as e:
             logger.warning(f"RTF striprtf error {rtf_path.name}: {e}")
 
-        content = raw_text
+        content = decoded_text
         content = re.sub(r'\\[a-z]+\d*', '', content)
         content = re.sub(r'[\\{};]', '', content)
         content = content.replace('\\par', '\n')
-        content = re.sub(r"\'([0-9a-fA-F]{2})", lambda m: bytes.fromhex(m.group(1)).decode(encoding, errors='replace'), content)
         lines = [line.strip() for line in content.split('\n') if line.strip() and len(line.strip()) > 3]
         result = '\n'.join(lines)
         logger.info(f"RTF(fallback): {rtf_path.name} ({len(result)} chars)")
