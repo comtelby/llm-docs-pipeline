@@ -199,13 +199,33 @@ def extract_text_from_doc(doc_path: Path) -> str:
     return ""
 
 
+def _detect_rtf_encoding(raw_bytes: bytes) -> str:
+    """Определяет кодировку RTF по заголовку \\ansicpgNNNN, иначе cp1251."""
+    try:
+        header = raw_bytes[:200].decode('latin-1', errors='replace')
+        m = re.search(r'\\ansicpg(\d+)', header)
+        if m:
+            cp = int(m.group(1))
+            return f'cp{cp}'
+    except Exception:
+        pass
+    return 'cp1251'
+
+
 def extract_text_from_rtf(rtf_path: Path) -> str:
     try:
-        # Читаем как latin-1, чтобы сохранить \'xx escape-последовательности для striprtf
         raw_bytes = rtf_path.read_bytes()
-        raw_text = raw_bytes.decode('latin-1')
+        encoding = _detect_rtf_encoding(raw_bytes)
 
-        # Попытка 1: striprtf (правильный парсинг RTF)
+        for enc in [encoding, 'cp1251', 'utf-8', 'latin-1']:
+            try:
+                raw_text = raw_bytes.decode(enc, errors='replace')
+                break
+            except (UnicodeDecodeError, LookupError):
+                continue
+        else:
+            raw_text = raw_bytes.decode('latin-1', errors='replace')
+
         try:
             from striprtf.striprtf import rtf_to_text
             result = rtf_to_text(raw_text)
@@ -217,12 +237,11 @@ def extract_text_from_rtf(rtf_path: Path) -> str:
         except Exception as e:
             logger.warning(f"RTF striprtf error {rtf_path.name}: {e}")
 
-        # Попытка 2: ручная очистка (fallback)
         content = raw_text
         content = re.sub(r'\\[a-z]+\d*', '', content)
         content = re.sub(r'[\\{};]', '', content)
         content = content.replace('\\par', '\n')
-        content = re.sub(r"\'[0-9a-fA-F]{2}", lambda m: chr(int(m.group(0)[1:], 16)), content)
+        content = re.sub(r"\'([0-9a-fA-F]{2})", lambda m: bytes.fromhex(m.group(1)).decode(encoding, errors='replace'), content)
         lines = [line.strip() for line in content.split('\n') if line.strip() and len(line.strip()) > 3]
         result = '\n'.join(lines)
         logger.info(f"RTF(fallback): {rtf_path.name} ({len(result)} chars)")
