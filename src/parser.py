@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 MODEL_MAP = {
     "hp5412": "HP 5412R 92GT PoE+",
+    "hp-5412": "HP 5412R 92GT PoE+",
     "hp5510": "HPE 5510 24G SFP 4SFP+ HI",
     "5510_m1": "HPE 5510 24G SFP 4SFP+ HI",
     "s6730": "Huawei S6730-H24X6C",

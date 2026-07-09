@@ -12,6 +12,9 @@ from src.eol import lookup_eol
 SAMPLE_CISCO_CONFIG = """
 hostname CORE-SW-5510_M1
 !
+vlan 100
+ name Management
+!
 interface Vlan100
  ip address 10.100.1.1 255.255.255.0
 !
