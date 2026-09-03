@@ -1,12 +1,25 @@
 import json
+import logging
 import sqlite3
+from pathlib import Path
 
 from src.config import DB_PATH
 from src.eol import EOL_DATABASE
 
+logger = logging.getLogger(__name__)
+
 
 def get_connection() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        # Verify directory is writable
+        test_file = DB_PATH.parent / ".write_test"
+        test_file.write_text("test")
+        test_file.unlink()
+    except Exception as e:
+        logger.error(f"Cannot write to database directory {DB_PATH.parent}: {e}")
+        raise
+
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")

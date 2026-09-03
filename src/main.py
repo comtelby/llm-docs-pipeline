@@ -1,4 +1,5 @@
 import uvicorn
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -8,8 +9,29 @@ from src.routes.chat import router as chat_router
 from src.routes.files import router as files_router
 from src.routes.report_routes import router as report_router
 from src.routes.ui import router as ui_router
+import logging
 
-app = FastAPI(title="iqData Bot - Аудит ИТ-инфраструктуры")
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    logger.info("Starting up iqData Bot...")
+    try:
+        init_db()
+        logger.info("Database initialized successfully")
+        seed_eol_to_inventories()
+        logger.info("EOL data seeded")
+    except Exception as e:
+        logger.error(f"Startup error: {e}")
+        raise
+    yield
+    # Shutdown
+    logger.info("Shutting down iqData Bot...")
+
+
+app = FastAPI(title="iqData Bot - Аудит ИТ-инфраструктуры", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -24,12 +46,6 @@ app.include_router(files_router)
 app.include_router(chat_router)
 app.include_router(report_router)
 app.include_router(audit_router, prefix="/api", tags=["audit"])
-
-
-@app.on_event("startup")
-async def startup():
-    init_db()
-    seed_eol_to_inventories()
 
 
 @app.get("/health")
