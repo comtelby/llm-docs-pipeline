@@ -5,6 +5,7 @@ from src.parser import (
     parse_device_config, read_text_file, extract_text_from_rtf,
     extract_text_from_xlsx, extract_text_from_xls,
     extract_text_from_docx, extract_text_from_file,
+    parse_inventory_rows, _map_inventory_columns,
 )
 from src.eol import lookup_eol
 
@@ -245,6 +246,65 @@ interface Vlan1
         assert sections[0]["title"] == "Главный раздел"
         has_sub = any(s["title"] == "Подраздел 1" for s in sections)
         assert has_sub
+
+
+    def test_parse_inventory_csv(self, tmp_path):
+        f = tmp_path / "inventory.csv"
+        f.write_text(
+            "model,vendor,category,eol\n"
+            "Cisco 2960,Cisco,network,2024-06-30\n"
+            "Huawei S5700,Huawei,network,2025-12-31\n",
+            encoding="utf-8",
+        )
+        rows = parse_inventory_rows(f)
+        assert len(rows) == 2
+        assert rows[0]["model"] == "Cisco 2960"
+        assert rows[0]["vendor"] == "Cisco"
+        assert rows[1]["model"] == "Huawei S5700"
+
+    def test_parse_inventory_xlsx(self, tmp_path):
+        f = tmp_path / "inv.xlsx"
+        try:
+            from openpyxl import Workbook
+            wb = Workbook()
+            ws = wb.active
+            ws.append(["Model", "Vendor", "EOL", "Status"])
+            ws.append(["Switch-1", "VendorA", "2025", "Active"])
+            ws.append(["Switch-2", "VendorB", "2026", "End-of-Sale"])
+            wb.save(str(f))
+            rows = parse_inventory_rows(f)
+            assert len(rows) == 2
+            assert rows[0]["model"] == "Switch-1"
+            assert rows[1]["eol_status"] == "End-of-Sale"
+        except ImportError:
+            pytest.skip("openpyxl not available")
+
+    def test_parse_inventory_txt(self, tmp_path):
+        f = tmp_path / "inv.txt"
+        f.write_text(
+            "Модель | Вендор | Тип\n"
+            "Router-X | Cisco | network\n"
+            "Switch-Y | HP | network\n",
+            encoding="utf-8",
+        )
+        rows = parse_inventory_rows(f)
+        assert len(rows) == 2
+        assert rows[0]["model"] == "Router-X"
+
+    def test_map_inventory_columns(self):
+        headers = ["model", "vendor", "eol", "specs"]
+        m = _map_inventory_columns(headers)
+        assert m["model"] == 0
+        assert m["vendor"] == 1
+        assert m["eol"] == 2
+        assert m["specs"] == 3
+
+    def test_map_inventory_columns_russian(self):
+        headers = ["модель", "производитель", "срок_поддержки"]
+        m = _map_inventory_columns(headers)
+        assert m["model"] == 0
+        assert m["vendor"] == 1
+        assert m["eol"] == 2
 
 
 if __name__ == "__main__":

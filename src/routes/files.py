@@ -1,6 +1,6 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile
 
-from src.storage import list_files, save_upload, delete_file, clear_temp
+from src.storage import clear_temp, delete_file, list_files, save_upload
 
 router = APIRouter()
 
@@ -11,13 +11,13 @@ async def get_files():
 
 
 @router.post("/upload/{category}")
-async def upload_file(category: str, file: UploadFile = File(...)):
+async def upload_file(category: str, file: UploadFile):
     try:
         filename = await save_upload(category, file)
         return {"status": "success", "filename": filename}
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"Ошибка загрузки: {e}")
 
 
@@ -28,7 +28,7 @@ async def remove_file(category: str, filename: str):
         return {"status": "deleted"}
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"Ошибка удаления: {e}")
 
 

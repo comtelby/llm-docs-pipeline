@@ -1,10 +1,10 @@
+
 import requests
-from typing import Optional
 
 from src.config import OLLAMA_API_URL, OLLAMA_DEFAULT_MODEL
 
 
-def query_ollama(prompt: str, model: Optional[str] = None,
+def query_ollama(prompt: str, model: str | None = None,
                  temperature: float = 0.3, num_predict: int = 2000,
                  timeout: int = 120) -> str:
     model = model or OLLAMA_DEFAULT_MODEL

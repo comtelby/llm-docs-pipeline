@@ -2,7 +2,7 @@
 
 import pytest
 import os
-from src.database import init_db, add_inventory, list_inventories, delete_inventory, find_inventory_by_model, save_audit_history, list_audit_history
+from src.database import init_db, add_inventory, list_inventories, delete_inventory, find_inventory_by_model, upsert_inventory, save_audit_history, list_audit_history
 from src.config import DB_PATH
 
 
@@ -39,6 +39,21 @@ class TestDatabase:
         pk = add_inventory("ToDelete", vendor="Test")
         assert delete_inventory(pk) is True
         assert delete_inventory(99999) is False
+
+    def test_upsert_inventory_inserts_new(self):
+        updated = upsert_inventory("NewModel", vendor="Vendor1")
+        assert updated is False
+        found = find_inventory_by_model("NewModel")
+        assert found is not None
+        assert found["vendor"] == "Vendor1"
+
+    def test_upsert_inventory_updates_existing(self):
+        upsert_inventory("ExistingModel", vendor="OldVendor", eol="2020")
+        updated = upsert_inventory("ExistingModel", vendor="NewVendor", eol="2025")
+        assert updated is True
+        found = find_inventory_by_model("ExistingModel")
+        assert found["vendor"] == "NewVendor"
+        assert found["eol"] == "2025"
 
     def test_list_by_category(self):
         add_inventory("Server", category="server")

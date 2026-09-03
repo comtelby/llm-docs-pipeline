@@ -1,14 +1,13 @@
 import io
-import markdown
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse, PlainTextResponse, HTMLResponse
 
 import aiofiles
+import markdown
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
 
 from src.config import OUTPUT_DIR
 from src.database import list_audit_history
 from src.report import generate_report
-
 from src.state import get_last_prompt
 
 router = APIRouter()
@@ -30,11 +29,11 @@ async def list_reports():
         for f in OUTPUT_DIR.iterdir():
             if f.is_file():
                 s = f.stat()
-                from datetime import datetime
+                from datetime import datetime, timezone
                 reports.append({
                     "name": f.name,
                     "size_bytes": s.st_size,
-                    "modified": datetime.fromtimestamp(s.st_mtime).isoformat()
+                    "modified": datetime.fromtimestamp(s.st_mtime, tz=timezone.utc).isoformat()
                 })
     return {"reports": sorted(reports, key=lambda x: x["modified"], reverse=True)}
 
@@ -109,7 +108,7 @@ def _md_to_docx(content: str, buf: io.BytesIO):
             i += 1
             continue
 
-        if line.startswith('# ') or line.startswith('## ') or line.startswith('### '):
+        if line.startswith(('# ', '## ', '### ')):
             level = len(line) - len(line.lstrip('#'))
             heading_text = line.lstrip('# ').strip()
             if level <= 1:
@@ -155,13 +154,13 @@ def _md_to_docx(content: str, buf: io.BytesIO):
             doc.add_paragraph('─' * 40)
 
         elif line.startswith('*') and line.endswith('*'):
-            doc.add_paragraph(line.strip('*')).italic = True
+            doc.add_paragraph(line.removeprefix('*').removesuffix('*')).italic = True
 
         else:
             p = doc.add_paragraph(line)
             if line.startswith('**') and line.endswith('**'):
                 p.clear()
-                run = p.add_run(line.strip('*'))
+                run = p.add_run(line.removeprefix('*').removesuffix('*'))
                 run.bold = True
 
         i += 1
@@ -175,8 +174,8 @@ async def _export_docx(content: str, filename: str) -> FileResponse:
     buf.seek(0)
     docx_filename = filename.replace('.md', '.docx')
     tmp_path = OUTPUT_DIR / docx_filename
-    with open(tmp_path, 'wb') as f:
-        f.write(buf.read())
+    async with aiofiles.open(tmp_path, 'wb') as f:
+        await f.write(buf.read())
     return FileResponse(str(tmp_path), filename=docx_filename)
 
 
@@ -239,7 +238,7 @@ async def _export_pdf(content: str, filename: str) -> FileResponse:
             continue
 
         if has_cyrillic:
-            if stripped.startswith('# ') or stripped.startswith('## ') or stripped.startswith('### '):
+            if stripped.startswith(('# ', '## ', '### ')):
                 level = len(stripped) - len(stripped.lstrip('#'))
                 text = stripped.lstrip('# ').strip()
                 pdf.set_font('DejaVu', 'B', max(12, 16 - level * 2))

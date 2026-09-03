@@ -1,6 +1,5 @@
-import sqlite3
 import json
-from typing import Optional
+import sqlite3
 
 from src.config import DB_PATH
 from src.eol import EOL_DATABASE
@@ -105,6 +104,28 @@ def add_inventory(model: str, vendor: str = "", category: str = "network",
     return pk
 
 
+def upsert_inventory(model: str, vendor: str = "", category: str = "network",
+                     eol: str = "", eol_status: str = "",
+                     specs: str = "", source_url: str = "") -> bool:
+    conn = get_connection()
+    existing = conn.execute("SELECT id FROM inventories WHERE model = ?", (model,)).fetchone()
+    if existing:
+        conn.execute(
+            "UPDATE inventories SET vendor=?, category=?, eol=?, eol_status=?, specs=?, source_url=? WHERE model=?",
+            (vendor, category, eol, eol_status, specs, source_url, model)
+        )
+        updated = True
+    else:
+        conn.execute(
+            "INSERT INTO inventories (model, vendor, category, eol, eol_status, specs, source_url) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (model, vendor, category, eol, eol_status, specs, source_url)
+        )
+        updated = False
+    conn.commit()
+    conn.close()
+    return updated
+
+
 def delete_inventory(item_id: int) -> bool:
     conn = get_connection()
     cur = conn.execute("DELETE FROM inventories WHERE id = ?", (item_id,))
@@ -114,7 +135,7 @@ def delete_inventory(item_id: int) -> bool:
     return deleted
 
 
-def find_inventory_by_model(model: str) -> Optional[dict]:
+def find_inventory_by_model(model: str) -> dict | None:
     conn = get_connection()
     row = conn.execute(
         "SELECT * FROM inventories WHERE model LIKE ? LIMIT 1",

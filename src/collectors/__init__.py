@@ -1,0 +1,1 @@
+# iqData Bot - Collectors package

@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Form, HTTPException
-from src.llm import query_ollama, list_ollama_models
+
+from src.llm import list_ollama_models, query_ollama
 from src.state import set_last_prompt
 
 router = APIRouter()

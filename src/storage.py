@@ -1,11 +1,22 @@
 import os
 import uuid
-import shutil
+from datetime import datetime, timezone
 from pathlib import Path
-from datetime import datetime
-from fastapi import UploadFile, HTTPException
 
-from src.config import INVENTORY_DIR, CONFIGS_DIR, SCREENSHOTS_DIR, SAMPLES_DIR, OUTPUT_DIR
+import aiofiles
+from fastapi import HTTPException, UploadFile
+
+from src.config import (
+    CONFIGS_DIR,
+    INVENTORY_DIR,
+    OUTPUT_DIR,
+    SAMPLES_DIR,
+    SCREENSHOTS_DIR,
+)
+from src.database import upsert_inventory
+from src.parser import parse_inventory_rows
+
+logger = __import__("logging").getLogger(__name__)
 
 CATEGORY_DIR_MAP = {
     "inventory": INVENTORY_DIR,
@@ -38,7 +49,7 @@ def list_files() -> dict:
                     files_info[category].append({
                         "name": f.name,
                         "size_bytes": s.st_size,
-                        "modified": datetime.fromtimestamp(s.st_mtime).isoformat()
+                        "modified": datetime.fromtimestamp(s.st_mtime, tz=timezone.utc).isoformat()
                     })
     return files_info
 
@@ -47,9 +58,38 @@ async def save_upload(category: str, file: UploadFile) -> str:
     if category not in CATEGORY_DIR_MAP:
         raise HTTPException(400, "Неизвестная категория")
     path = CATEGORY_DIR_MAP[category] / f"{uuid.uuid4().hex}_{file.filename}"
-    with open(path, "wb") as buf:
-        shutil.copyfileobj(file.file, buf)
+    async with aiofiles.open(path, "wb") as buf:
+        content = await file.read()
+        await buf.write(content)
+
+    if category == "inventory":
+        _import_inventory_to_db(path, file.filename)
+
     return file.filename
+
+
+def _import_inventory_to_db(file_path: Path, original_name: str) -> dict:
+    rows = parse_inventory_rows(file_path)
+    updated_count = 0
+    inserted_count = 0
+    for rec in rows:
+        updated = upsert_inventory(
+            model=rec["model"],
+            vendor=rec["vendor"],
+            category=rec["category"],
+            eol=rec["eol"],
+            eol_status=rec["eol_status"],
+            specs=rec["specs"],
+            source_url=original_name,
+        )
+        if updated:
+            updated_count += 1
+        else:
+            inserted_count += 1
+    logger.info(
+        f"Импорт из {original_name}: {inserted_count} новых, {updated_count} обновлено"
+    )
+    return {"inserted": inserted_count, "updated": updated_count}
 
 
 def delete_file(category: str, filename: str):

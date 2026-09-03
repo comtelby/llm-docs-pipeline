@@ -1,19 +1,36 @@
 import asyncio
-import re
 import logging
-from datetime import datetime
-
+import re
+from datetime import datetime, timezone
 
 import aiofiles
 
-from src.config import CONFIGS_DIR, SCREENSHOTS_DIR, SAMPLES_DIR, INVENTORY_DIR, OUTPUT_DIR
-from src.parser import (
-    parse_device_config, extract_text_from_image,
-    extract_text_from_file
+from src.config import (
+    CONFIGS_DIR,
+    INVENTORY_DIR,
+    OUTPUT_DIR,
+    SAMPLES_DIR,
+    SCREENSHOTS_DIR,
 )
+from src.database import find_inventory_by_model, save_audit_history
+from src.eol import batch_upsert_from_audit
 from src.llm import query_ollama
-from src.database import save_audit_history, find_inventory_by_model
-from src.models import DeviceInfo
+from src.models import (
+    AntivirusInfo,
+    BackupInfo,
+    DatabaseInfo,
+    DeviceInfo,
+    NetworkSecurityInfo,
+    ServerInfo,
+    StorageInfo,
+    VirtualizationInfo,
+)
+from src.normalizer import build_aggregated_summary
+from src.parser import (
+    classify_and_parse,
+    extract_text_from_file,
+    extract_text_from_image,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +41,21 @@ def _classify_devices(devices: list[DeviceInfo]) -> dict:
     access = [d for d in devices if any(k in d.hostname.lower() for k in ["2530", "2620", "5120", "5731"])]
     edge = [d for d in devices if any(k in d.hostname.lower() for k in ["c4331", "h6121", "asa"])]
     return {"core": core, "dist": dist, "access": access, "edge": edge}
+
+
+def _auto_add_eol(model: str, hostname: str, category: str) -> None:
+    """Автоматически добавляет обнаруженное оборудование в EOL-базу."""
+    if not model or model == "Неизвестно":
+        return
+    try:
+        batch_upsert_from_audit([{
+            "model": model,
+            "vendor": model.split()[0] if model.split() else "",
+            "category": category,
+            "note": "Обнаружено во время аудита",
+        }])
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"Auto EOL add error: {e}")
 
 
 def _extract_template_sections(text: str) -> list[dict]:
@@ -91,7 +123,7 @@ def _read_template() -> str:
             text = extract_text_from_file(f)
             if text and len(text) > 100:
                 return text[:50000]
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(f"Ошибка чтения шаблона {f.name}: {e}")
     return ""
 
@@ -108,7 +140,7 @@ def _read_inventory_text() -> str:
             text = extract_text_from_file(f)
             if text and len(text) > 50:
                 sources.append(f"--- {f.name} ---\n{text[:10000]}")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(f"Ошибка чтения inventory {f.name}: {e}")
     return "\n\n".join(sources)
 
@@ -126,7 +158,7 @@ def _read_screenshots_text() -> str:
             ocr = extract_text_from_image(f)
             if ocr and len(ocr) > 20:
                 parts.append(f"--- {f.name} ---\n{ocr[:3000]}")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.warning(f"OCR ошибка {f.name}: {e}")
     return "\n\n".join(parts)
 
@@ -172,40 +204,81 @@ def _build_device_detail_text(devices: list[DeviceInfo]) -> str:
 async def generate_report(prompt: str) -> dict:
     logger.info("=== НАЧАЛО ГЕНЕРАЦИИ ОТЧЁТА ===")
 
-    # === ЧТЕНИЕ ВСЕХ ДАННЫХ ===
     devices: list[DeviceInfo] = []
+    servers: list[ServerInfo] = []
+    vm_info: list[VirtualizationInfo] = []
+    storage_list: list[StorageInfo] = []
+    databases: list[DatabaseInfo] = []
+    backups_list: list[BackupInfo] = []
+    antivirus_list: list[AntivirusInfo] = []
+    firewalls_list: list[NetworkSecurityInfo] = []
+    raw_texts: list[tuple[str, str, str]] = []
 
-    # Парсинг конфигов (все поддерживаемые форматы)
     if CONFIGS_DIR.exists():
         for f in CONFIGS_DIR.iterdir():
             if not f.is_file():
                 continue
             text = extract_text_from_file(f)
-            if text and len(text) > 100:
-                device = parse_device_config(text, f.name)
-                if device.hostname:
-                    inv = await asyncio.to_thread(find_inventory_by_model, device.model)
-                    if inv:
-                        device.eol_info = {"eol": inv["eol"], "status": inv["eol_status"], "note": inv.get("specs", "")}
-                    devices.append(device)
-                    logger.info(f"  Устройство: {device.hostname} ({device.model}) из {f.name}")
-                else:
-                    logger.info(f"  Inventory/документ (не конфиг): {f.name} ({len(text)} chars)")
+            if text and len(text) > 50:
+                result, file_type = classify_and_parse(text, f.name)
+                if result is None:
+                    logger.info(f"  Неопознанный файл: {f.name} ({len(text)} chars)")
+                    raw_texts.append((f.name, file_type, text[:3000]))
+                    continue
 
-    # Чтение данных
+                if isinstance(result, DeviceInfo) and result.hostname:
+                    inv = await asyncio.to_thread(find_inventory_by_model, result.model)
+                    if inv:
+                        result.eol_info = {"eol": inv["eol"], "status": inv["eol_status"], "note": inv.get("specs", "")}
+                    devices.append(result)
+                    logger.info(f"  Сеть: {result.hostname} ({result.model}) [{file_type}]")
+                elif isinstance(result, ServerInfo):
+                    servers.append(result)
+                    _auto_add_eol(result.model, result.hostname, "server")
+                    logger.info(f"  Сервер: {result.hostname} [{file_type}]")
+                elif isinstance(result, VirtualizationInfo):
+                    vm_info.append(result)
+                    _auto_add_eol(result.hypervisor_version, "", "virtualization")
+                    logger.info(f"  Виртуализация: {result.hypervisor_type} {result.hypervisor_version} [{file_type}]")
+                elif isinstance(result, StorageInfo):
+                    storage_list.append(result)
+                    _auto_add_eol(result.model, "", "storage")
+                    logger.info(f"  СХД/NAS: {result.model} [{file_type}]")
+                elif isinstance(result, DatabaseInfo):
+                    databases.append(result)
+                    _auto_add_eol(result.version, "", "database")
+                    logger.info(f"  СУБД: {result.dbms_type} {result.version} [{file_type}]")
+                elif isinstance(result, BackupInfo):
+                    backups_list.append(result)
+                    _auto_add_eol(result.product, "", "backup")
+                    logger.info(f"  СРК: {result.product} [{file_type}]")
+                elif isinstance(result, AntivirusInfo):
+                    antivirus_list.append(result)
+                    _auto_add_eol(result.product, "", "antivirus")
+                    logger.info(f"  АВ: {result.product} [{file_type}]")
+                elif isinstance(result, NetworkSecurityInfo):
+                    firewalls_list.append(result)
+                    _auto_add_eol(result.firewall_model, "", "firewall")
+                    logger.info(f"  МСЭ/VPN: {result.firewall_model} [{file_type}]")
+                else:
+                    raw_texts.append((f.name, file_type, text[:3000]))
+                    logger.info(f"  Прочее: {f.name} [{file_type}]")
+
     template_text = await asyncio.to_thread(_read_template)
     inventory_text = await asyncio.to_thread(_read_inventory_text)
     screenshots_text = await asyncio.to_thread(_read_screenshots_text)
 
-    # Извлечение структуры шаблона
     template_sections = _extract_template_sections(template_text) if template_text else []
 
-    logger.info(f"Устройств: {len(devices)}, Инвентаризации: {len(inventory_text)} chars, "
-                f"Скриншотов OCR: {len(screenshots_text)} chars, Шаблон: {len(template_text)} chars, "
-                f"Разделов шаблона: {len(template_sections)}")
+    logger.info(
+        f"Итого - Сеть: {len(devices)}, Серверы: {len(servers)}, ВМ: {len(vm_info)}, "
+        f"СХД: {len(storage_list)}, СУБД: {len(databases)}, СРК: {len(backups_list)}, "
+        f"АВ: {len(antivirus_list)}, МСЭ: {len(firewalls_list)}, "
+        f"Скриншотов OCR: {len(screenshots_text)} chars, Шаблон: {len(template_text)} chars"
+    )
 
     # === АНАЛИТИКА ===
-    groups = _classify_devices(devices)
+    _classify_devices(devices)
     eol_critical = [d for d in devices if d.eol_info.get("status") == "EOSL"]
     eol_warning = [d for d in devices if d.eol_info.get("status") == "End-of-Sale"]
     eol_ok = [d for d in devices if d.eol_info.get("status") == "Актуальное"]
@@ -213,7 +286,8 @@ async def generate_report(prompt: str) -> dict:
     no_ntp = [d for d in devices if not d.ntp_servers]
     no_acl = [d for d in devices if not d.acl]
 
-    # === ФОРМИРОВАНИЕ ОТЧЁТА ===
+    aggregated = build_aggregated_summary(devices, servers, vm_info, storage_list, databases, backups_list, antivirus_list, firewalls_list)
+
     report_sections = []
 
     # Если есть шаблон — используем LLM для генерации по структуре шаблона
@@ -242,34 +316,59 @@ async def generate_report(prompt: str) -> dict:
 
 ДАННЫЕ ДЛЯ ЗАПОЛНЕНИЯ:
 
-1. Список устройств (таблица):
+1. Сетевое оборудование (таблица):
 {device_table}
 
-2. Детальная информация по устройствам:
+2. Детальная информация по сетевым устройствам:
 {device_details}
 
-3. EOL-анализ:
+3. Серверное оборудование ({len(servers)} серверов):
+{"".join(f"- {s.hostname}: {s.cpu_model} / RAM {s.ram_total_gb}GB / Диски {s.disk_total_gb}GB ({s.disk_free_pct}% свободно) / RAID {s.raid_level} [{s.raid_status}] / EOL: {s.eol_info.get('status', '?')}" + chr(10) for s in servers[:20]) if servers else "Нет данных" + chr(10)}
+
+4. Виртуализация ({sum(v.vm_count for v in vm_info)} ВМ на {sum(v.hosts_count for v in vm_info)} хостах):
+{"".join(f"- {v.hypervisor_type} {v.hypervisor_version}: {v.hosts_count} хостов, {v.vm_count} ВМ, кластер: {v.cluster_name or 'нет'}" + chr(10) for v in vm_info[:10]) if vm_info else "Нет данных" + chr(10)}
+
+5. Системы хранения ({len(storage_list)} устройств, {round(sum(s.total_capacity_gb for s in storage_list)/1024, 1)} TB суммарно):
+{"".join(f"- {s.model}: {s.device_type} / {s.total_capacity_gb}GB / RAID {s.raid_level} / Статус: {s.status}" + chr(10) for s in storage_list[:10]) if storage_list else "Нет данных" + chr(10)}
+
+6. СУБД ({len(databases)}):
+{"".join(f"- {d.dbms_type} {d.version} на {d.server_name}: Auth={d.auth_mode}, TDE={d.encryption}, HA={d.ha_enabled}" + chr(10) for d in databases[:10]) if databases else "Нет данных" + chr(10)}
+
+7. Система резервного копирования ({len(backups_list)} продуктов):
+{"".join(f"- {b.product} {b.version}: репозиторий={b.repo_type}, ошибок={len(b.errors)}, retention={b.retention_days}дн" + chr(10) for b in backups_list[:10]) if backups_list else "Нет данных" + chr(10)}
+
+8. Антивирусная защита ({len(antivirus_list)}):
+{"".join(f"- {a.product} {a.version}: централизован={a.central_management}, лицензий={a.total_licenses}, агентов={a.installed_agents}" + chr(10) for a in antivirus_list[:10]) if antivirus_list else "Нет данных" + chr(10)}
+
+9. МСЭ/VPN ({len(firewalls_list)}):
+{"".join(f"- {f.firewall_model} {f.firewall_version}: VPN={f.remote_access}, MFA={f.mfa_enabled}, шифрование={f.encryption_type}" + chr(10) for f in firewalls_list[:10]) if firewalls_list else "Нет данных" + chr(10)}
+
+10. EOL-анализ:
 - Актуальных: {len(eol_ok)}
 - End-of-Sale: {', '.join(d.hostname for d in eol_warning) if eol_warning else 'нет'}
 - EOSL: {', '.join(d.hostname for d in eol_critical) if eol_critical else 'нет'}
 
-4. Проблемы безопасности:
+11. Проблемы безопасности:
 {issues_str}
 
-5. Данные со скриншотов:
+12. Данные со скриншотов:
 {screenshots_text[:5000] if screenshots_text else 'Нет данных со скриншотов'}
 
-6. Инвентаризационные данные:
+13. Инвентаризационные данные:
 {inventory_text[:5000] if inventory_text else 'Нет данных инвентаризации'}
 
-7. Исходный запрос оператора:
+14. Прочие данные (не классифицированные):
+{"".join(f"--- {name} ({ftype}) ---" + chr(10) + txt[:1000] + chr(10) for name, ftype, txt in raw_texts[:5]) if raw_texts else 'Нет'}
+
+15. Исходный запрос оператора:
 {prompt[:500]}
 
 ВАЖНЫЕ ТРЕБОВАНИЯ:
 - Отчёт должен быть на русском языке, в деловом стиле.
 - Строго соблюдай структуру разделов из шаблона.
 - Если раздел шаблона подразумевает таблицу — сделай таблицу.
-- Данные со скриншотов используй для разделов, которые не покрыты конфигами (например, Active Directory, серверы, информационные системы).
+- Используй ВСЕ данные: серверы, виртуализацию, СХД, СУБД, СРК, АВ, МСЭ — для заполнения соответствующих разделов.
+- Данные со скриншотов используй для разделов, которые не покрыты конфигами.
 - Инвентаризационные данные используй для обогащения характеристик оборудования.
 - Каждый раздел начинай с заголовка соответствующего уровня.
 - Не добавляй разделов, которых нет в структуре.
@@ -292,7 +391,7 @@ async def generate_report(prompt: str) -> dict:
     if not template_sections:
         report_sections.append(f"""# ОТЧЁТ ПО АУДИТУ ИТ-ИНФРАСТРУКТУРЫ
 
-**Дата:** {datetime.now().strftime('%d.%m.%Y')}
+**Дата:** {datetime.now(timezone.utc).strftime('%d.%m.%Y')}
 **Основание:** {prompt[:200]}
 
 ---
@@ -301,35 +400,60 @@ async def generate_report(prompt: str) -> dict:
 
 | Параметр | Значение |
 |----------|----------|
-| Всего устройств | {len(devices)} |
-| Ядро/агрегация | {len(groups['core'])} |
-| Распределение | {len(groups['dist'])} |
-| Доступ | {len(groups['access'])} |
-| Периметр/WAN | {len(groups['edge'])} |
+| Сетевых устройств | {len(devices)} |
+| Серверов | {len(servers)} |
+| Хостов виртуализации | {sum(v.hosts_count for v in vm_info)} |
+| Виртуальных машин | {sum(v.vm_count for v in vm_info)} |
+| Устройств хранения | {len(storage_list)} |
+| СУБД | {len(databases)} |
+| Продуктов СРК | {len(backups_list)} |
+| Антивирусных решений | {len(antivirus_list)} |
+| МСЭ/VPN | {len(firewalls_list)} |
 | Актуальное оборудование | {len(eol_ok)} |
 | End-of-Sale | {len(eol_warning)} |
 | EOSL (критическое) | {len(eol_critical)} |
-| Скриншотов обработано | {len(screenshots_text)} |
 
 """)
 
         report_sections.append("## 2. СОСТАВ СЕТЕВОГО ОБОРУДОВАНИЯ\n\n")
         report_sections.append(_build_device_markdown_table(devices) + "\n\n")
 
-        report_sections.append("\n## 3. ДЕТАЛЬНЫЙ АНАЛИЗ УСТРОЙСТВ\n\n")
-        detail_text = _build_device_detail_text(devices)
+        report_sections.append("\n## 3. СЕРВЕРНОЕ ОБОРУДОВАНИЕ\n\n")
+        if servers:
+            report_sections.append("| Сервер | CPU | RAM (GB) | Диски (GB) | RAID | Свободно (%) | EOL |\n")
+            report_sections.append("|--------|-----|----------|------------|------|-------------|-----|\n")
+            for s in servers[:20]:
+                report_sections.append(
+                    f"| {s.hostname} | {s.cpu_model[:30]} | {s.ram_total_gb} | {s.disk_total_gb} | "
+                    f"{s.raid_level} | {s.disk_free_pct}% | {s.eol_info.get('status', '?')} |\n"
+                )
+        else:
+            report_sections.append("Данные о серверах не загружены.\n")
 
-        try:
-            llm_analysis = await asyncio.to_thread(
-                query_ollama,
-                f"Проанализируй сетевые устройства и напиши краткое описание каждого (2-3 предложения на русском):\n\n{detail_text}\n\nДля каждого укажи роль в сети.",
-                temperature=0.3, num_predict=3000, timeout=300
-            )
-            report_sections.append(llm_analysis)
-        except RuntimeError as e:
-            report_sections.append(f"*Анализ не выполнен: {e}*\n")
+        report_sections.append("\n## 4. ВИРТУАЛИЗАЦИЯ\n\n")
+        if vm_info:
+            for v in vm_info[:10]:
+                report_sections.append(f"### {v.hypervisor_type} {v.hypervisor_version}\n")
+                report_sections.append(f"- Хостов: {v.hosts_count}\n")
+                report_sections.append(f"- ВМ: {v.vm_count}\n")
+                report_sections.append(f"- Кластер: {v.cluster_name or 'не настроен'}\n")
+                report_sections.append(f"- HA: {'включён' if v.ha_enabled else 'не настроен'}\n\n")
+        else:
+            report_sections.append("Данные о виртуализации не загружены.\n")
 
-        report_sections.append("\n## 4. АНАЛИЗ ЖИЗНЕННОГО ЦИКЛА\n\n")
+        report_sections.append("\n## 5. СИСТЕМЫ ХРАНЕНИЯ ДАННЫХ\n\n")
+        if storage_list:
+            report_sections.append("| Модель | Тип | Ёмкость (GB) | Использовано | RAID | Статус |\n")
+            report_sections.append("|--------|-----|-------------|-------------|------|--------|\n")
+            for s in storage_list[:15]:
+                report_sections.append(
+                    f"| {s.model[:30]} | {s.device_type} | {s.total_capacity_gb} | {s.used_capacity_gb} | "
+                    f"{s.raid_level} | {s.status} |\n"
+                )
+        else:
+            report_sections.append("Данные о системах хранения не загружены.\n")
+
+        report_sections.append("\n## 6. АНАЛИЗ ЖИЗНЕННОГО ЦИКЛА\n\n")
         if eol_critical:
             table = "### Критическое (EOSL)\n| Устройство | Модель | EOL | Риск |\n|---|---|---|---|\n"
             for d in eol_critical:
@@ -343,19 +467,50 @@ async def generate_report(prompt: str) -> dict:
         if not eol_critical and not eol_warning:
             report_sections.append("Актуальное оборудование, критических позиций EOL не выявлено.\n")
 
-        report_sections.append("\n## 5. ПРОБЛЕМЫ БЕЗОПАСНОСТИ\n\n")
+        report_sections.append("\n## 7. ПРОБЛЕМЫ БЕЗОПАСНОСТИ\n\n")
         if no_aaa:
             report_sections.append(f"- Отсутствует AAA: {len(no_aaa)} устройств\n")
         if no_ntp:
             report_sections.append(f"- Отсутствует NTP: {len(no_ntp)} устройств\n")
         if no_acl:
             report_sections.append(f"- Отсутствуют ACL: {len(no_acl)} устройств\n")
-        if not no_aaa and not no_ntp and not no_acl:
+        if aggregated["critical_issues"]:
+            for issue in aggregated["critical_issues"]:
+                report_sections.append(f"- {issue}\n")
+        if not no_aaa and not no_ntp and not no_acl and not aggregated["critical_issues"]:
             report_sections.append("Критических проблем не выявлено.\n")
 
-        # Раздел: данные со скриншотов (ADDS, серверы, ИС)
+        report_sections.append("\n## 8. ИНФРАСТРУКТУРНЫЕ СЕРВИСЫ\n\n")
+        report_sections.append(f"### СУБД ({len(databases)})\n")
+        if databases:
+            for d in databases[:10]:
+                report_sections.append(f"- {d.dbms_type} {d.version} на {d.server_name}: Auth={d.auth_mode}, TDE={d.encryption}, HA={d.ha_enabled}\n")
+        else:
+            report_sections.append("Данные о СУБД не загружены.\n")
+
+        report_sections.append(f"\n### Система резервного копирования ({len(backups_list)})\n")
+        if backups_list:
+            for b in backups_list[:10]:
+                report_sections.append(f"- {b.product} {b.version}: репозиторий={b.repo_type}, ошибок={len(b.errors)}\n")
+        else:
+            report_sections.append("Данные о СРК не загружены.\n")
+
+        report_sections.append(f"\n### Антивирусная защита ({len(antivirus_list)})\n")
+        if antivirus_list:
+            for a in antivirus_list[:10]:
+                report_sections.append(f"- {a.product} {a.version}: централизован={a.central_management}, лицензий={a.total_licenses}\n")
+        else:
+            report_sections.append("Данные об антивирусной защите не загружены.\n")
+
+        report_sections.append(f"\n### МСЭ/VPN ({len(firewalls_list)})\n")
+        if firewalls_list:
+            for f in firewalls_list[:10]:
+                report_sections.append(f"- {f.firewall_model} {f.firewall_version}: VPN={f.remote_access}, MFA={f.mfa_enabled}\n")
+        else:
+            report_sections.append("Данные о МСЭ/VPN не загружены.\n")
+
         if screenshots_text:
-            report_sections.append("\n## 6. ДАННЫЕ СИСТЕМЫ СЛУЖБЫ КАТАЛОГОВ (ADDS)\n\n")
+            report_sections.append("\n## 9. ДАННЫЕ СИСТЕМЫ СЛУЖБЫ КАТАЛОГОВ (ADDS)\n\n")
             try:
                 adds_prompt = (
                     f"Проанализируй данные со скриншотов систем Active Directory (ADDS), DHCP, DNS, "
@@ -374,41 +529,44 @@ async def generate_report(prompt: str) -> dict:
                 report_sections.append("На основе OCR-распознавания скриншотов:\n\n")
                 report_sections.append(f"```\n{screenshots_text[:10000]}\n```\n\n")
 
-        # Раздел: инвентаризационные данные
         if inventory_text:
-            report_sections.append("\n## 7. ИНВЕНТАРИЗАЦИОННЫЕ ДАННЫЕ\n\n")
+            report_sections.append("\n## 10. ИНВЕНТАРИЗАЦИОННЫЕ ДАННЫЕ\n\n")
             report_sections.append(f"```\n{inventory_text[:5000]}\n```\n\n")
 
         try:
-            conclusion_prompt = "Напиши итоговое заключение по аудиту ИТ-инфраструктуры (3-5 предложений на русском):"
-            conclusion_prompt += f" всего устройств {len(devices)}, EOSL {len(eol_critical)}, End-of-Sale {len(eol_warning)}, "
-            conclusion_prompt += f"устройства без AAA: {len(no_aaa)}, без NTP: {len(no_ntp)}, без ACL: {len(no_acl)}, "
-            conclusion_prompt += f"ключевые: {', '.join(d.hostname for d in devices[:5])}"
+            conclusion_parts = [
+                (f"Всего сетевых устройств: {len(devices)}, серверов: {len(servers)}, "
+                f"хостов виртуализации: {sum(v.hosts_count for v in vm_info)}, ВМ: {sum(v.vm_count for v in vm_info)}, "
+                f"устройств хранения: {len(storage_list)}, СУБД: {len(databases)}. "
+                f"EOSL: {len(eol_critical)}, End-of-Sale: {len(eol_warning)}. "
+                f"Без AAA: {len(no_aaa)}, без NTP: {len(no_ntp)}, без ACL: {len(no_acl)}.")
+            ]
+            if aggregated["critical_issues"]:
+                conclusion_parts.append(f"Критические проблемы: {'; '.join(aggregated['critical_issues'])}.")
+            conclusion_prompt = "Напиши итоговое заключение по аудиту ИТ-инфраструктуры (5-8 предложений на русском): " + " ".join(conclusion_parts)
             if screenshots_text and len(screenshots_text) > 100:
-                conclusion_prompt += ". Также проанализированы скриншоты ADDS, DHCP, DNS, безопасности"
-            if inventory_text and len(inventory_text) > 100:
-                conclusion_prompt += ". Использованы справочные данные inventory"
+                conclusion_prompt += ". Также проанализированы скриншоты ADDS, DHCP, DNS, безопасности."
             conclusion = await asyncio.to_thread(
                 query_ollama, conclusion_prompt,
                 temperature=0.3, num_predict=1000, timeout=120
             )
-            report_sections.append("\n## 8. ЗАКЛЮЧЕНИЕ\n\n" + conclusion + "\n")
+            report_sections.append("\n## 11. ЗАКЛЮЧЕНИЕ\n\n" + conclusion + "\n")
         except RuntimeError:
-            report_sections.append("\n## 8. ЗАКЛЮЧЕНИЕ\n\n*Не сгенерировано*\n")
+            report_sections.append("\n## 11. ЗАКЛЮЧЕНИЕ\n\n*Не сгенерировано*\n")
 
-        report_sections.append(f"\n---\n*Отчёт сгенерирован {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}*\n")
+        report_sections.append(f"\n---\n*Отчёт сгенерирован {datetime.now(timezone.utc).strftime('%d.%m.%Y %H:%M:%S')}*\n")
 
     # === СОХРАНЕНИЕ ===
     full_report = "\n".join(report_sections)
-    filename = f"audit_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+    filename = f"audit_report_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.md"
     path = OUTPUT_DIR / filename
     async with aiofiles.open(path, "w", encoding="utf-8") as f:
         await f.write(full_report)
 
     await asyncio.to_thread(save_audit_history,
         filename, prompt,
-        len(devices), len(eol_critical),
-        len(eol_warning), len([i for i in [no_aaa, no_ntp, no_acl, eol_critical] if i])
+        len(devices) + len(servers) + len(vm_info), len(eol_critical),
+        len(eol_warning), len(aggregated["critical_issues"])
     )
 
     logger.info(f"ОТЧЁТ СОХРАНЁН: {path} ({len(full_report)} chars)")
@@ -419,7 +577,15 @@ async def generate_report(prompt: str) -> dict:
         "path": str(path),
         "content_preview": full_report[:500] + "...",
         "devices": len(devices),
+        "servers": len(servers),
+        "virtual_hosts": sum(v.hosts_count for v in vm_info),
+        "vms": sum(v.vm_count for v in vm_info),
+        "storage": len(storage_list),
+        "databases": len(databases),
+        "backups": len(backups_list),
+        "antivirus": len(antivirus_list),
+        "firewalls": len(firewalls_list),
         "eol_critical": len(eol_critical),
         "eol_warning": len(eol_warning),
-        "issues_found": len([i for i in [no_aaa, no_ntp, no_acl, eol_critical] if i])
+        "issues_found": len(aggregated["critical_issues"]),
     }
