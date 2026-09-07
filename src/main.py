@@ -18,17 +18,22 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting up iqData Bot...")
+    print("LIFESPAN STARTUP STARTED", flush=True)
     try:
         init_db()
         logger.info("Database initialized successfully")
+        print("Database initialized successfully", flush=True)
         seed_eol_to_inventories()
         logger.info("EOL data seeded")
+        print("EOL data seeded", flush=True)
     except Exception as e:
         logger.error(f"Startup error: {e}")
+        print(f"Startup error: {e}", flush=True)
         raise
     yield
     # Shutdown
     logger.info("Shutting down iqData Bot...")
+    print("LIFESPAN SHUTDOWN", flush=True)
 
 
 app = FastAPI(title="iqData Bot - Аудит ИТ-инфраструктуры", lifespan=lifespan)
