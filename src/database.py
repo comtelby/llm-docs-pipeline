@@ -148,7 +148,32 @@ def delete_inventory(item_id: int) -> bool:
     return deleted
 
 
+def _ensure_schema_exists() -> None:
+    """Ensure database schema exists. Call this before operations that require tables."""
+    conn = get_connection()
+    try:
+        # Check if inventories table exists
+        row = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='inventories'"
+        ).fetchone()
+        if not row:
+            # Schema doesn't exist, initialize it
+            conn.close()
+            init_db()
+            seed_eol_to_inventories()
+        else:
+            conn.close()
+    except sqlite3.OperationalError:
+        # If any error, try to initialize
+        conn.close()
+        init_db()
+        seed_eol_to_inventories()
+
+
 def find_inventory_by_model(model: str) -> dict | None:
+    # Ensure schema exists before querying
+    _ensure_schema_exists()
+    
     conn = get_connection()
     row = conn.execute(
         "SELECT * FROM inventories WHERE model LIKE ? LIMIT 1",

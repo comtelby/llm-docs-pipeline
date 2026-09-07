@@ -1,1 +1,7 @@
-Fix lifespan and database init
+Fix: Add schema auto-initialization to handle missing tables
+
+- Added _ensure_schema_exists() in database.py to auto-create tables if missing
+- Fixed sqlite3.OperationalError: no such table: inventories
+- Applied schema check in find_inventory_by_model and _sync_eol_to_db
+- All endpoints now working: chat, generate-report, exports (PDF/DOCX/HTML)
+- All 35 tests pass
