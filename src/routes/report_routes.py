@@ -3,12 +3,19 @@ import io
 import aiofiles
 import markdown
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, StreamingResponse
 
 from src.config import OUTPUT_DIR
 from src.database import list_audit_history
 from src.report import generate_report
 from src.state import get_last_prompt
+
+# PDF export (weasyprint)
+try:
+    from weasyprint import HTML, CSS
+    WEASYPRINT_AVAILABLE = True
+except ImportError:
+    WEASYPRINT_AVAILABLE = False
 
 router = APIRouter()
 
@@ -85,7 +92,7 @@ async def export_report(filename: str, format: str = "md"):
     elif format == "pdf":
         return await _export_pdf(content, filename)
     else:
-        raise HTTPException(400, f"Формат {format} не поддерживается")
+        raise HTTPException(400, f"Формат {format} не поддерживается. Доступные: md, txt, html, docx, pdf")
 
 
 def _md_to_docx(content: str, buf: io.BytesIO):
@@ -179,92 +186,119 @@ async def _export_docx(content: str, filename: str) -> FileResponse:
     return FileResponse(str(tmp_path), filename=docx_filename)
 
 
-def _find_dejavu_fonts():
-    import os
-    paths = [
-        '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-        '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
-        '/usr/local/share/fonts/dejavu/DejaVuSans.ttf',
-        '/usr/share/fonts/dejavu/DejaVuSans.ttf',
-    ]
-    regular = None
-    bold = None
-    for p in paths:
-        if os.path.exists(p):
-            if 'Bold' in p:
-                bold = p
-            else:
-                regular = p
-    return regular, bold
+async def _export_pdf(content: str, filename: str) -> StreamingResponse:
+    if not WEASYPRINT_AVAILABLE:
+        raise HTTPException(501, "PDF экспорт недоступен: установите weasyprint")
 
-
-async def _export_pdf(content: str, filename: str) -> FileResponse:
-    try:
-        from fpdf import FPDF
-    except ImportError:
-        raise HTTPException(500, "fpdf2 не установлен")
-
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_auto_page_break(auto=True, margin=15)
-
-    font_regular, font_bold = _find_dejavu_fonts()
-    if font_regular:
-        pdf.add_font('DejaVu', '', font_regular, uni=True)
-        if font_bold:
-            pdf.add_font('DejaVu', 'B', font_bold, uni=True)
-        has_cyrillic = True
-    else:
-        has_cyrillic = False
-
-    lines = content.split('\n')
-    in_code = False
-    for line in lines:
-        stripped = line.strip()
-        if not stripped:
-            pdf.ln(3)
-            continue
-
-        if stripped.startswith('```'):
-            in_code = not in_code
-            continue
-
-        if in_code:
-            if has_cyrillic:
-                pdf.set_font('DejaVu', '', 8)
-            else:
-                pdf.set_font('Courier', '', 8)
-            pdf.multi_cell(0, 4, stripped)
-            continue
-
-        if has_cyrillic:
-            if stripped.startswith(('# ', '## ', '### ')):
-                level = len(stripped) - len(stripped.lstrip('#'))
-                text = stripped.lstrip('# ').strip()
-                pdf.set_font('DejaVu', 'B', max(12, 16 - level * 2))
-                pdf.multi_cell(0, 8, text)
-                pdf.ln(2)
-            elif stripped.startswith('|') and stripped.endswith('|'):
-                pdf.set_font('DejaVu', '', 8)
-                cells = [c.strip() for c in stripped.split('|')[1:-1]]
-                col_w = 180 / max(len(cells), 1)
-                for c in cells:
-                    pdf.cell(col_w, 6, c, border=1)
-                pdf.ln()
-            elif stripped.startswith('---'):
-                pdf.ln(3)
-            else:
-                pdf.set_font('DejaVu', '', 10)
-                pdf.multi_cell(0, 5, stripped)
-        else:
-            safe = stripped.encode('ascii', errors='replace').decode('ascii')
-            pdf.set_font('Helvetica', '', 10)
-            pdf.multi_cell(0, 5, safe)
-
+    from io import BytesIO
+    
+    # Markdown -> HTML
+    html_content = markdown.markdown(
+        content,
+        extensions=['tables', 'fenced_code', 'toc', 'attr_list']
+    )
+    
+    # CSS для красивого PDF
+    css = CSS(string='''
+        @page {
+            size: A4;
+            margin: 2cm;
+            @top-center { content: "Отчёт по аудиту ИТ-инфраструктуры"; font-size: 9pt; color: #666; }
+            @bottom-center { content: counter(page); font-size: 9pt; color: #666; }
+        }
+        body {
+            font-family: "DejaVu Sans", "Arial", sans-serif;
+            font-size: 11pt;
+            line-height: 1.5;
+            color: #333;
+        }
+        h1, h2, h3, h4 {
+            color: #1F3A5F;
+            page-break-after: avoid;
+            margin-top: 1.5em;
+            margin-bottom: 0.5em;
+        }
+        h1 { font-size: 18pt; border-bottom: 2px solid #1F3A5F; padding-bottom: 4px; }
+        h2 { font-size: 15pt; border-bottom: 1px solid #1F3A5F; padding-bottom: 3px; }
+        h3 { font-size: 13pt; }
+        h4 { font-size: 12pt; }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 1em 0;
+            page-break-inside: auto;
+        }
+        tr { page-break-inside: avoid; page-break-after: auto; }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 6px 8px;
+            font-size: 9pt;
+        }
+        th {
+            background-color: #1F3A5F;
+            color: white;
+            font-weight: bold;
+        }
+        tr:nth-child(even) td { background-color: #f5f5f5; }
+        code {
+            font-family: "DejaVu Sans Mono", "Consolas", monospace;
+            background-color: #f5f5f5;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-size: 9pt;
+            color: #CC0000;
+        }
+        pre {
+            background-color: #1e1e1e;
+            color: #d4d4d4;
+            padding: 12px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 8.5pt;
+            page-break-inside: avoid;
+        }
+        pre code { background: none; padding: 0; color: inherit; }
+        blockquote {
+            border-left: 4px solid #1F3A5F;
+            padding-left: 12px;
+            margin: 1em 0;
+            color: #666;
+            font-style: italic;
+        }
+        hr {
+            border: none;
+            border-top: 1px solid #ddd;
+            margin: 1.5em 0;
+        }
+        p { margin: 0.5em 0; }
+        ul, ol { margin: 0.5em 0; padding-left: 2em; }
+        li { margin: 0.25em 0; }
+        .toc { page-break-after: always; }
+    ''')
+    
+    # Полный HTML документ
+    full_html = f'''<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Отчёт по аудиту</title>
+</head>
+<body>
+{html_content}
+</body>
+</html>'''
+    
+    # Генерация PDF
+    buffer = BytesIO()
+    HTML(string=full_html).write_pdf(buffer, stylesheets=[css])
+    buffer.seek(0)
+    
     pdf_filename = filename.replace('.md', '.pdf')
-    tmp_path = OUTPUT_DIR / pdf_filename
-    pdf.output(str(tmp_path))
-    return FileResponse(str(tmp_path), filename=pdf_filename)
+    return StreamingResponse(
+        buffer,
+        media_type='application/pdf',
+        headers={"Content-Disposition": f"attachment; filename={pdf_filename}"}
+    )
 
 
 @router.get("/audit-history")

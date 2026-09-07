@@ -152,7 +152,7 @@ http://<IP_ВАШЕГО_СЕРВЕРА>:8000/
     └── audit.db      # SQLite БД
 ```
 
-> **Политика очистки:** Кнопка "Очистить временные данные" удаляет только `configs/` и `screenshots/`. `inventory/` и `samples/` сохраняются навсегда.
+> **Политика очистки:** Кнопка "Очистить временные данные" удаляет только `configs/` и `screenshots/`. `inventory/` и `samples/` сохраняются навсегда - reads all .md, .docx, .rtf, .txt files!
 
 ---
 
@@ -368,7 +368,7 @@ find /app/output -name "*.md" -mtime +90 -delete
 
 ---
 
-## 📞 Поддержка
+## 📞 Поддержка @genebaikov
 
 При проблемах:
 1. Проверьте логи: `docker-compose logs -f`
@@ -377,4 +377,4 @@ find /app/output -name "*.md" -mtime +90 -delete
 
 ---
 
-*Документ создан автоматически на основе кодовой базы iqDataBot v1.0*
+*Документ создан @genebaikov на основе кодовой базы iqDataBot v1.0*

@@ -201,6 +201,114 @@ def _build_device_detail_text(devices: list[DeviceInfo]) -> str:
     return '\n'.join(lines)
 
 
+def _build_llm_prompt(
+    *,
+    template_text: str,
+    template_structure: str,
+    template_placeholders: list,
+    prompt: str,
+    device_table: str,
+    device_details: str,
+    servers_table: str,
+    storage_table: str,
+    eol_table: str,
+    vm_text: str,
+    databases_text: str,
+    backups_text: str,
+    antivirus_text: str,
+    firewalls_text: str,
+    screenshots_text: str,
+    inventory_text: str,
+    critical_issues_text: str,
+    devices: list,
+    servers: list,
+) -> str:
+    """Build LLM prompt for report generation. Separate function to avoid parser issues with long strings."""
+    aaa_info = (
+        'Настроено на ' + str(len(devices) - len([d for d in devices if not d.aaa])) + ' из ' + str(len(devices)) + ' устройств'
+    ) if devices else 'Нет устройств'
+    ntp_info = (
+        'Настроен на ' + str(len(devices) - len([d for d in devices if not d.ntp_servers])) + ' из ' + str(len(devices)) + ' устройств'
+    ) if devices else 'Нет устройств'
+    acl_info = (
+        'Настроены на ' + str(len(devices) - len([d for d in devices if not d.acl])) + ' из ' + str(len(devices)) + ' устройств'
+    ) if devices else 'Нет устройств'
+    dhcp_snooping_count = sum(1 for d in devices if d.dhcp_snooping)
+    port_security_count = sum(1 for d in devices if d.port_security)
+    bpdu_protection_count = sum(1 for d in devices if d.bpdu_protection)
+    servers_info = servers_table if servers_table else "Нет данных о серверах."
+    storage_info = storage_table if storage_table else "Нет данных о системах хранения."
+    eol_info = eol_table if eol_table else "Все оборудование актуально."
+    screenshots_info = screenshots_text[:8000] if screenshots_text else 'Нет данных'
+    inventory_info = inventory_text[:5000] if inventory_text else 'Нет данных'
+    prompt_short = prompt[:500]
+    placeholders_str = ', '.join(template_placeholders) if template_placeholders else 'Нет плейсхолдеров'
+
+    return (
+        "ТЫ — СЕНИОР ИНЖЕНЕР ПО АУДИТУ ИТ-ИНФРАСТРУКТУРЫ. Твоя задача — сгенерировать ПОЛНЫЙ, ДЕТАЛЬНЫЙ, ПРОФЕССИОНАЛЬНЫЙ отчёт на русском языке, СТРОГО следуя ПОЛНОМУ СОДЕРЖИМОМУ ШАБЛОНА.\n\n"
+        "═══════════════════════════════════════════════════════════════\n"
+        "ПОЛНЫЙ ШАБЛОН ОТЧЁТА (ОБЯЗАТЕЛЬНО СОБЛЮДАЙ КАЖДЫЙ РАЗДЕЛ, ПОДРАЗДЕЛ, ТАБЛИЦУ, ПЛЕЙСХОЛДЕР):\n"
+        + template_text + "\n"
+        "═══════════════════════════════════════════════════════════════\n\n"
+        "СТРУКТУРА РАЗДЕЛОВ (извлечена из шаблона):\n"
+        + template_structure + "\n\n"
+        "ПЛЕЙСХОЛДЕРЫ ШАБЛОНА (ОБЯЗАТЕЛЬНО ЗАПОЛНИ ВСЕ):\n"
+        + placeholders_str + "\n\n"
+        "═══════════════════════════════════════════════════════════════\n\n"
+        "ДАННЫЕ ДЛЯ ЗАПОЛНЕНИЯ ШАБЛОНА:\n"
+        "═══════════════════════════════════════════════════════════════\n\n"
+        "ДАННЫЕ СЕТЕВОГО ОБОРУДОВАНИЯ:\n"
+        "- Сводная таблица устройств:\n"
+        + device_table + "\n\n"
+        "- Детальная информация по устройствам:\n"
+        + device_details + "\n\n"
+        "ДАННЫЕ СЕРВЕРОВ:\n"
+        + servers_info + "\n\n"
+        "ДАННЫЕ СИСТЕМ ХРАНЕНИЯ:\n"
+        + storage_info + "\n\n"
+        "EOL АНАЛИЗ:\n"
+        + eol_info + "\n\n"
+        "ИНФОРМАЦИОННАЯ БЕЗОПАСНОСТЬ:\n"
+        "- AAA/TACACS: " + aaa_info + "\n"
+        "- NTP: " + ntp_info + "\n"
+        "- ACL: " + acl_info + "\n"
+        "- DHCP Snooping: " + str(dhcp_snooping_count) + " устройств\n"
+        "- Port Security: " + str(port_security_count) + " устройств\n"
+        "- BPDU Protection: " + str(bpdu_protection_count) + " устройств\n\n"
+        "КРИТИЧЕСКИЕ ПРОБЛЕМЫ:\n"
+        + critical_issues_text + "\n"
+        "ВИРТУАЛИЗАЦИЯ:\n"
+        + vm_text + "\n\n"
+        "СУБД:\n"
+        + databases_text + "\n\n"
+        "СРК (BACKUP):\n"
+        + backups_text + "\n\n"
+        "АНТИВИРУС:\n"
+        + antivirus_text + "\n\n"
+        "МСЭ/VPN/FIREWALL:\n"
+        + firewalls_text + "\n\n"
+        "ADDS/AD (ИЗ СКРИНШОТОВ OCR):\n"
+        + screenshots_info + "\n\n"
+        "DHCP/DNS (ИЗ INVENTORY):\n"
+        + inventory_info + "\n\n"
+        "ИСХОДНЫЙ ЗАПРОС ОПЕРАТОРА:\n"
+        + prompt_short + "\n\n"
+        "═══════════════════════════════════════════════════════════════\n"
+        "СТРОГИЕ ПРАВИЛА ГЕНЕРАЦИИ (НАРУШЕНИЕ = ПРОВАЛ ЗАДАЧИ):\n"
+        "═══════════════════════════════════════════════════════════════\n"
+        "1. ВЫВОДИ ВСЕ РАЗДЕЛИ И ПОДРАЗДЕЛЫ ИЗ ШАБЛОНА В ТОМ ЖЕ ПОРЯДКЕ С ТЕМИ ЖЕ ЗАГОЛОВКАМИ (уровни # ## ###)\n"
+        "2. ВСЕ ТАБЛИЦЫ ИЗ ШАБЛОНА ДОЛЖНЫ БЫТЬ ПРИСУТСТВОВАТЬ С ТЕМИ ЖЕ ЗАГОЛОВКАМИ КОЛОНОК\n"
+        "3. ВСЕ ПЛЕЙСХОЛДЕРЫ ВИДА {{PLACEHOLDER}} ИЗ ШАБЛОНА ОБЯЗАТЕЛЬНО ЗАМЕНИ НА РЕАЛЬНЫЕ ДАННЫЕ ИЗ БЛОКА ВЫШЕ\n"
+        "4. ЕСЛИ ДЛЯ ПЛЕЙСХОЛДЕРА НЕТ ДАННЫХ — НАПИШИ \"Данные отсутствуют. Требуется дополнительный сбор информации.\"\n"
+        "5. НЕ ДОБАВЛЯЙ НИКАКИХ РАЗДЕЛОВ, КОТОРЫХ НЕТ В ШАБЛОНЕ\n"
+        "6. НЕ УДАЛЯЙ НИ ОДИН РАЗДЕЛ ИЗ ШАБЛОНА\n"
+        "7. СТИЛЬ: деловой, технический, конкретные цифры и факты, без \"воды\"\n"
+        "8. ДЛИНА: отчёт должен быть ПОЛНЫМ — используй все предоставленные данные\n"
+        "9. МАРКДАУН: используй таблицы в формате | col1 | col2 | с разделителями |---|---|\n"
+        "10. В ЗАКЛЮЧЕНИИ: итоговая оценка состояния по разделам шаблона, ключевые риски, приоритеты действий\n"
+    )
+
+
 async def generate_report(prompt: str) -> dict:
     logger.info("=== НАЧАЛО ГЕНЕРАЦИИ ОТЧЁТА ===")
 
@@ -277,6 +385,11 @@ async def generate_report(prompt: str) -> dict:
         f"Скриншотов OCR: {len(screenshots_text)} chars, Шаблон: {len(template_text)} chars"
     )
 
+    # Extract all placeholders from template for strict adherence
+    import re
+    template_placeholders = re.findall(r'\{\{([A-Z_][A-Z0-9_]*)\}\}', template_text) if template_text else []
+    template_placeholders = list(set(template_placeholders))  # unique
+
     # === АНАЛИТИКА ===
     _classify_devices(devices)
     eol_critical = [d for d in devices if d.eol_info.get("status") == "EOSL"]
@@ -309,71 +422,112 @@ async def generate_report(prompt: str) -> dict:
             issues_list.append(f"- **EOSL:** {len(eol_critical)} устройств с прекращённой поддержкой")
         issues_str = '\n'.join(issues_list) if issues_list else "Критических проблем не выявлено."
 
-        llm_report_prompt = f"""Ты — инженер по аудиту ИТ-инфраструктуры. Сформируй отчёт на русском языке строго по указанной структуре разделов.
+        # Build detailed data mapping for each template section
+        eol_table = ""
+        if eol_critical:
+            eol_table += "### Критическое оборудование (EOSL)\n\n"
+            eol_table += "| Устройство | Модель | EOL Дата | Риск |\n"
+            eol_table += "|------------|--------|----------|------|\n"
+            for d in eol_critical:
+                eol_table += f"| {d.hostname} | {d.model} | {d.eol_info.get('eol', '?')} | {d.eol_info.get('note', '')} |\n"
+            eol_table += "\n"
+        if eol_warning:
+            eol_table += "### Оборудование End-of-Sale\n\n"
+            eol_table += "| Устройство | Модель | EOL Дата | Рекомендация |\n"
+            eol_table += "|------------|--------|----------|---------------|\n"
+            for d in eol_warning:
+                eol_table += f"| {d.hostname} | {d.model} | {d.eol_info.get('eol', '?')} | Планировать замену |\n"
+            eol_table += "\n"
+        if eol_ok:
+            eol_table += "### Актуальное оборудование\n\n"
+            eol_table += "| Устройство | Модель | Статус |\n"
+            eol_table += "|------------|--------|--------|\n"
+            for d in eol_ok[:20]:
+                eol_table += f"| {d.hostname} | {d.model} | 🟢 Актуальное |\n"
+            eol_table += "\n"
 
-СТРУКТУРА ОТЧЁТА (должна быть соблюдена):
-{template_structure}
+        servers_table = ""
+        if servers:
+            servers_table = "| Сервер | CPU | RAM (GB) | Диски (GB) | RAID | Свободно (%) | EOL |\n"
+            servers_table += "|--------|-----|----------|------------|------|--------------|-----|\n"
+            for s in servers[:20]:
+                servers_table += f"| {s.hostname} | {s.cpu_model[:30]} | {s.ram_total_gb} | {s.disk_total_gb} | {s.raid_level} | {s.disk_free_pct}% | {s.eol_info.get('status', '?')} |\n"
+            servers_table += "\n"
 
-ДАННЫЕ ДЛЯ ЗАПОЛНЕНИЯ:
+        storage_table = ""
+        if storage_list:
+            storage_table = "| Модель | Тип | Ёмкость (GB) | Использовано | RAID | Статус |\n"
+            storage_table += "|--------|-----|--------------|--------------|------|--------|\n"
+            for s in storage_list[:15]:
+                storage_table += f"| {s.model[:30]} | {s.device_type} | {s.total_capacity_gb} | {s.used_capacity_gb} | {s.raid_level} | {s.status} |\n"
+            storage_table += "\n"
 
-1. Сетевое оборудование (таблица):
-{device_table}
+        databases_text = ""
+        if databases:
+            for d in databases[:10]:
+                databases_text += f"- **{d.dbms_type} {d.version}** на {d.server_name}: Auth={d.auth_mode}, TDE={d.encryption}, HA={d.ha_enabled}\n"
+        else:
+            databases_text = "Нет данных\n"
 
-2. Детальная информация по сетевым устройствам:
-{device_details}
+        backups_text = ""
+        if backups_list:
+            for b in backups_list[:10]:
+                backups_text += f"- **{b.product} {b.version}**: репозиторий={b.repo_type}, ошибок={len(b.errors)}, retention={b.retention_days}дн\n"
+        else:
+            backups_text = "Нет данных\n"
 
-3. Серверное оборудование ({len(servers)} серверов):
-{"".join(f"- {s.hostname}: {s.cpu_model} / RAM {s.ram_total_gb}GB / Диски {s.disk_total_gb}GB ({s.disk_free_pct}% свободно) / RAID {s.raid_level} [{s.raid_status}] / EOL: {s.eol_info.get('status', '?')}" + chr(10) for s in servers[:20]) if servers else "Нет данных" + chr(10)}
+        antivirus_text = ""
+        if antivirus_list:
+            for a in antivirus_list[:10]:
+                antivirus_text += f"- **{a.product} {a.version}**: централизован={a.central_management}, лицензий={a.total_licenses}, агентов={a.installed_agents}\n"
+        else:
+            antivirus_text = "Нет данных\n"
 
-4. Виртуализация ({sum(v.vm_count for v in vm_info)} ВМ на {sum(v.hosts_count for v in vm_info)} хостах):
-{"".join(f"- {v.hypervisor_type} {v.hypervisor_version}: {v.hosts_count} хостов, {v.vm_count} ВМ, кластер: {v.cluster_name or 'нет'}" + chr(10) for v in vm_info[:10]) if vm_info else "Нет данных" + chr(10)}
+        firewalls_text = ""
+        if firewalls_list:
+            for f in firewalls_list[:10]:
+                firewalls_text += f"- **{f.firewall_model} {f.firewall_version}**: VPN={f.remote_access}, MFA={f.mfa_enabled}, шифрование={f.encryption_type}\n"
+        else:
+            firewalls_text = "Нет данных\n"
 
-5. Системы хранения ({len(storage_list)} устройств, {round(sum(s.total_capacity_gb for s in storage_list)/1024, 1)} TB суммарно):
-{"".join(f"- {s.model}: {s.device_type} / {s.total_capacity_gb}GB / RAID {s.raid_level} / Статус: {s.status}" + chr(10) for s in storage_list[:10]) if storage_list else "Нет данных" + chr(10)}
+        vm_text = ""
+        if vm_info:
+            for v in vm_info[:10]:
+                vm_text += f"- **{v.hypervisor_type} {v.hypervisor_version}**: {v.hosts_count} хостов, {v.vm_count} ВМ, кластер: {v.cluster_name or 'нет'}, HA: {'включён' if v.ha_enabled else 'нет'}\n"
+        else:
+            vm_text = "Нет данных\n"
 
-6. СУБД ({len(databases)}):
-{"".join(f"- {d.dbms_type} {d.version} на {d.server_name}: Auth={d.auth_mode}, TDE={d.encryption}, HA={d.ha_enabled}" + chr(10) for d in databases[:10]) if databases else "Нет данных" + chr(10)}
+        # Critical issues details
+        critical_issues_text = ""
+        if aggregated.get("critical_issues"):
+            for issue in aggregated["critical_issues"]:
+                critical_issues_text += f"- {issue}\n"
+        else:
+            critical_issues_text = "Критических проблем не выявлено.\n"
 
-7. Система резервного копирования ({len(backups_list)} продуктов):
-{"".join(f"- {b.product} {b.version}: репозиторий={b.repo_type}, ошибок={len(b.errors)}, retention={b.retention_days}дн" + chr(10) for b in backups_list[:10]) if backups_list else "Нет данных" + chr(10)}
+        # Build LLM prompt using helper to avoid parser issues
+        llm_report_prompt = _build_llm_prompt(
+            template_text=template_text,
+            template_structure=template_structure,
+            template_placeholders=template_placeholders,
+            prompt=prompt,
+            device_table=device_table,
+            device_details=device_details,
+            servers_table=servers_table,
+            storage_table=storage_table,
+            eol_table=eol_table,
+            vm_text=vm_text,
+            databases_text=databases_text,
+            backups_text=backups_text,
+            antivirus_text=antivirus_text,
+            firewalls_text=firewalls_text,
+            screenshots_text=screenshots_text,
+            inventory_text=inventory_text,
+            critical_issues_text=critical_issues_text,
+            devices=devices,
+            servers=servers,
+        )
 
-8. Антивирусная защита ({len(antivirus_list)}):
-{"".join(f"- {a.product} {a.version}: централизован={a.central_management}, лицензий={a.total_licenses}, агентов={a.installed_agents}" + chr(10) for a in antivirus_list[:10]) if antivirus_list else "Нет данных" + chr(10)}
-
-9. МСЭ/VPN ({len(firewalls_list)}):
-{"".join(f"- {f.firewall_model} {f.firewall_version}: VPN={f.remote_access}, MFA={f.mfa_enabled}, шифрование={f.encryption_type}" + chr(10) for f in firewalls_list[:10]) if firewalls_list else "Нет данных" + chr(10)}
-
-10. EOL-анализ:
-- Актуальных: {len(eol_ok)}
-- End-of-Sale: {', '.join(d.hostname for d in eol_warning) if eol_warning else 'нет'}
-- EOSL: {', '.join(d.hostname for d in eol_critical) if eol_critical else 'нет'}
-
-11. Проблемы безопасности:
-{issues_str}
-
-12. Данные со скриншотов:
-{screenshots_text[:5000] if screenshots_text else 'Нет данных со скриншотов'}
-
-13. Инвентаризационные данные:
-{inventory_text[:5000] if inventory_text else 'Нет данных инвентаризации'}
-
-14. Прочие данные (не классифицированные):
-{"".join(f"--- {name} ({ftype}) ---" + chr(10) + txt[:1000] + chr(10) for name, ftype, txt in raw_texts[:5]) if raw_texts else 'Нет'}
-
-15. Исходный запрос оператора:
-{prompt[:500]}
-
-ВАЖНЫЕ ТРЕБОВАНИЯ:
-- Отчёт должен быть на русском языке, в деловом стиле.
-- Строго соблюдай структуру разделов из шаблона.
-- Если раздел шаблона подразумевает таблицу — сделай таблицу.
-- Используй ВСЕ данные: серверы, виртуализацию, СХД, СУБД, СРК, АВ, МСЭ — для заполнения соответствующих разделов.
-- Данные со скриншотов используй для разделов, которые не покрыты конфигами.
-- Инвентаризационные данные используй для обогащения характеристик оборудования.
-- Каждый раздел начинай с заголовка соответствующего уровня.
-- Не добавляй разделов, которых нет в структуре.
-- Если данных для какого-то раздела недостаточно — напиши "Нет данных" или "Требуется дополнительный сбор информации".
-"""
         try:
             llm_result = await asyncio.to_thread(
                 query_ollama, llm_report_prompt,
@@ -384,10 +538,8 @@ async def generate_report(prompt: str) -> dict:
         except RuntimeError as e:
             logger.error(f"LLM ошибка: {e}")
             report_sections.append(f"*Ошибка LLM-генерации: {e}*\n")
-            # Fallback на стандартную структуру
             template_sections = []
 
-    # Если шаблона нет или LLM упал — стандартная структура
     if not template_sections:
         report_sections.append(f"""# ОТЧЁТ ПО АУДИТУ ИТ-ИНФРАСТРУКТУРЫ
 

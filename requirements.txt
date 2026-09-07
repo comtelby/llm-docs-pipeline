@@ -20,3 +20,4 @@ xlrd==2.0.1
 xlwt==1.3.0
 striprtf==0.0.26
 fpdf2>=2.7.0
+weasyprint>=62.0

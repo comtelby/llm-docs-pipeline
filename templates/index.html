@@ -55,8 +55,7 @@
                 <h4>Диалоговое окно: iqBot Prompt</h4>
                 <p class="text-muted">
                     Сформулируйте задачу для генерации отчёта. Например:<br>
-                    <em>"Проанализируй ИТ инфраструктуру Заказчика. Особое внимание удели сетевым устройствам Cisco и серверам HP. 
-                    Используй шаблон audit_template.md"</em>
+                    <em>"Проанализируй ИТ инфраструктуру Заказчика. Данные конфигураций будут предоставлены. Особое внимание удели <Указать раздел отчёта>. Для генерации отчёта используй шаблон <Выбрать шаблон раздела>."</em>
                 </p>
                 <div class="row g-3">
                     <div class="col-md-8">
@@ -85,6 +84,19 @@
     <div class="row g-4">
         <!-- Левая колонка: Загрузка данных -->
         <div class="col-md-6">
+            <!-- Подготовка к новому проекту (перемещено наверх) -->
+            <div class="panel-box">
+                <h5>Подготовка к новому проекту/разделу</h5>
+                <p class="text-muted small">
+                    Очищает временные данные (конфиги и скриншоты) для аудита нового заказчика/раздела.<br>
+                    Справочные данные и шаблоны сохраняются.
+                </p>
+                <button id="clearTempBtn" class="btn btn-outline-danger w-100 mb-3">
+                    🗑️ Очистить временные данные (для нового проекта/раздела)
+                </button>
+            </div>
+            
+            <!-- Поле загрузки данных -->
             <div class="panel-box">
                 <h4>Поле загрузки данных</h4>
                 <p class="text-muted small">Загрузите необходимые данные для аудита</p>
@@ -106,22 +118,19 @@
                     </button>
                 </div>
                 
-                <input type="file" id="hiddenFileInput" style="display: none;" multiple>
-                
-                <hr>
-                
-                <h5>Подготовка к новому проекту</h5>
-                <p class="text-muted small">
-                    Очищает временные данные (конфиги и скриншоты) для аудита нового заказчика.<br>
-                    Справочные данные и шаблоны сохраняются.
-                </p>
-                <button id="clearTempBtn" class="btn btn-outline-danger w-100">
-                    🗑️ Очистить временные данные (для нового проекта)
-                </button>
-            </div>
-        </div>
+<input type="file" id="hiddenFileInput" style="display: none;" multiple>
+                 
+                 <hr>
+                 
+                 <button id="genReportBtn" class="btn btn-success w-100 btn-lg" disabled>
+                     📋 Сгенерировать отчёт по аудиту<br>
+                     <small style="font-size:0.8em;opacity:0.7">⚠️ Введите и отправьте промпт в чате</small>
+                 </button>
+                 <div id="reportStatus" class="mt-2" style="display: none;"></div>
+             </div>
+         </div>
 
-        <!-- Правая колонка: Статистика и генерация -->
+         <!-- Правая колонка: Статистика и генерация -->
         <div class="col-md-6">
             <div class="panel-box">
                 <h4>Пути хранения данных</h4>
@@ -155,14 +164,6 @@
                 <div id="filesContainer">
                     <p class="text-muted text-center">Загрузка...</p>
                 </div>
-                
-                <hr>
-                
-                <button id="genReportBtn" class="btn btn-success w-100 btn-lg" disabled>
-                    📋 Сгенерировать отчёт по аудиту<br>
-                    <small style="font-size:0.8em;opacity:0.7">⚠️ Введите и отправьте промпт в чате</small>
-                </button>
-                <div id="reportStatus" class="mt-2" style="display: none;"></div>
             </div>
         </div>
     </div>
