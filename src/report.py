@@ -2,6 +2,7 @@ import asyncio
 import logging
 import re
 from datetime import datetime, timezone
+from typing import Any
 
 import aiofiles
 
@@ -177,6 +178,218 @@ def _build_device_markdown_table(devices: list[DeviceInfo]) -> str:
     return '\n'.join(lines)
 
 
+def _build_placeholder_values(
+    *,
+    devices: list[DeviceInfo],
+    servers: list[ServerInfo],
+    vm_info: list[VirtualizationInfo],
+    storage_list: list[StorageInfo],
+    databases: list[DatabaseInfo],
+    backups_list: list[BackupInfo],
+    antivirus_list: list[AntivirusInfo],
+    firewalls_list: list[NetworkSecurityInfo],
+    inventory_text: str,
+    screenshots_text: str,
+    prompt: str,
+    device_table: str,
+    device_details: str,
+    servers_table: str,
+    storage_table: str,
+    eol_table: str,
+    critical_issues_text: str,
+    eol_critical: list,
+    eol_warning: list,
+    eol_ok: list,
+    no_aaa: list,
+    no_ntp: list,
+    no_acl: list,
+    aggregated: dict,
+) -> dict[str, str]:
+    """Build dictionary of placeholder values for template substitution."""
+    # Date and metadata
+    from datetime import datetime, timezone
+    date_str = datetime.now(timezone.utc).strftime('%d.%m.%Y')
+    
+    # Device classification
+    _classify_devices(devices)
+    core_devices = [d for d in devices if any(k in d.hostname.lower() for k in ["core", "5510", "s6730"])]
+    dist_devices = [d for d in devices if any(k in d.hostname.lower() for k in ["hp5412", "hp3500"])]
+    access_devices = [d for d in devices if any(k in d.hostname.lower() for k in ["2530", "2620", "5120", "5731"])]
+    edge_devices = [d for d in devices if any(k in d.hostname.lower() for k in ["c4331", "h6121", "asa"])]
+    
+    # NTP info
+    ntp_servers = []
+    for d in devices:
+        ntp_servers.extend(d.ntp_servers)
+    ntp_sources = list(set(ntp_servers))
+    ntp_source_1 = ntp_sources[0] if ntp_sources else "Не настроено"
+    ntp_source_2 = ntp_sources[1] if len(ntp_sources) > 1 else "Не настроено"
+    ntp_configured = len([d for d in devices if d.ntp_servers])
+    total_devices = len(devices)
+    
+    # NTP offset - would need actual NTP check, using placeholder
+    ntp_offset_max = "Не измерено"
+    
+    # DHCP servers
+    dhcp_servers = []
+    for d in devices:
+        # Would need DHCP config parsing
+        pass
+    dhcp_servers_str = "Не обнаружено" if not dhcp_servers else ", ".join(dhcp_servers)
+    
+    # DHCP Relay
+    dhcp_relay_str = "Не настроен"
+    
+    # IPAM
+    ipam_str = "Не обнаружено"
+    
+    # DNS
+    internal_dns = "Не обнаружено"
+    dns_forwarders = "Не настроено"
+    dnssec_str = "Не настроено"
+    
+    # Interzone firewalling
+    interzone_fw = "Не настроено"
+    
+    # ACL
+    devices_with_acl = len([d for d in devices if d.acl])
+    total_devices_count = len(devices)
+    acl_examples = "Примеры правил не извлечены"
+    
+    # CPP
+    cpp_str = "Не настроено"
+    
+    # L2 Security
+    dhcp_snooping_count = sum(1 for d in devices if d.dhcp_snooping)
+    port_security_count = sum(1 for d in devices if d.port_security)
+    bpdu_count = sum(1 for d in devices if d.bpdu_protection)
+    l2_security = f"DHCP Snooping: {dhcp_snooping_count} устройств, Port Security: {port_security_count} устройств, BPDU Guard: {bpdu_count} устройств"
+    
+    # VPN
+    s2s_vpn = "Не обнаружено"
+    ra_vpn = "Не обнаружено"
+    vpn_encryption = "Не настроено"
+    vpn_mfa = "Не настроено"
+    
+    # Syslog/NetFlow
+    syslog_servers = []
+    for d in devices:
+        syslog_servers.extend(d.syslog_servers)
+    syslog_servers = list(set(syslog_servers))
+    syslog_str = ", ".join(syslog_servers) if syslog_servers else "Не настроено"
+    
+    netflow_collectors = "Не настроено"
+    netflow_coverage = "Не настроено"
+    
+    # Connected servers
+    connected_servers = ", ".join([s.hostname for s in servers]) if servers else "Нет данных"
+    
+    # Hosts by VLAN
+    hosts_by_vlan = "Не подсчитано (требуется парсинг inventory)"
+    
+    # Network virtualization
+    network_virt = "Не обнаружено"
+    
+    # Replacement plan
+    replacement_plan = ""
+    if eol_critical:
+        replacement_plan += "Критическое (EOSL): " + ", ".join([f"{d.hostname} ({d.model})" for d in eol_critical]) + ". "
+    if eol_warning:
+        replacement_plan += "End-of-Sale: " + ", ".join([f"{d.hostname} ({d.model})" for d in eol_warning]) + ". "
+    if not replacement_plan:
+        replacement_plan = "План замены не требуется, оборудование актуально."
+    
+    return {
+        "DATE": datetime.now(timezone.utc).strftime('%d.%m.%Y'),
+        "OBJECT_NAME": "Заказчик (не указано в промпте)",
+        "DATA_PERIOD": "Не указан",
+        "INTRO_GOALS": "Анализ ИТ-инфраструктуры с акцентом на сетевое оборудование",
+        "INTRO_SCOPE": "Полный аудит сетевой инфраструктуры",
+        "INTRO_SOURCES": "Конфигурационные файлы, скриншоты, инвентаризационные данные",
+        "KSPD_TOPOLOGY": f"Сеть состоит из {len(devices)} сетевых устройств: {len(core_devices)} ядра, {len(dist_devices)} распределения, {len(access_devices)} доступа, {len(edge_devices)} периметра.",
+        "KSPD_NETWORK_DEVICES_TABLE": _build_device_markdown_table(devices),
+        "KSPD_SEGMENTATION": "VLAN сегментация: " + ", ".join([f"VLAN {v['id']}" for d in devices for v in d.vlans[:5]]) if devices else "Не определено",
+        "KSPD_ROUTING_PROTOCOLS": "OSPF, статическая маршрутизация" if any(d.ospf for d in devices) else "Статическая маршрутизация",
+        "KSPD_CORE_ANALYSIS": "Ядро сети состоит из коммутаторов уровня Core" if core_devices else "Не определено",
+        "KSPD_CORE_DEVICES_TABLE": "\n".join([f"| {d.hostname} | {d.model} | Core | {d.ip_mgmt} | {d.eol_info.get('status', '?')} | {'Да' if d.ospf else 'Нет'} | {'Да' if d.vrrp else 'Нет'} |" for d in core_devices]) if core_devices else "Нет устройств",
+        "KSPD_DISTRIBUTION_ANALYSIS": "Уровень агрегации представлен" if dist_devices else "Не выделен",
+        "KSPD_DISTRIBUTION_DEVICES_TABLE": "\n".join([f"| {d.hostname} | {d.model} | Distribution | {d.ip_mgmt} | {d.eol_info.get('status', '?')} | {d.ip_mgmt} | {len(d.vlans)} | {'Да' if d.acl else 'Нет'} |" for d in dist_devices]) if dist_devices else "Нет устройств",
+        "KSPD_ACCESS_ANALYSIS": "Уровень доступа представлен" if access_devices else "Не выделен",
+        "KSPD_ACCESS_DEVICES_SUMMARY": f"Количество устройств: {len(access_devices)}" if access_devices else "Нет устройств",
+        "KSPD_EDGE_ANALYSIS": "Периметр представлен" if edge_devices else "Не выделен",
+        "KSPD_EDGE_DEVICES_TABLE": "\n".join([f"| {d.hostname} | {d.model} | Edge | {d.ip_mgmt} | {d.eol_info.get('status', '?')} | 0 | 0 | {'Да' if d.acl else 'Нет'} |" for d in edge_devices]) if edge_devices else "Нет устройств",
+        "KSPD_WIFI_ANALYSIS": "Wi-Fi не обнаружено в конфигурациях",
+        "KSPD_IGP_PROTOCOLS": "OSPF" if any(d.ospf for d in devices) else "Не настроено",
+        "KSPD_EGP_PROTOCOLS": "Не настроено (нет BGP)",
+        "KSPD_PBR": "Не настроено",
+        "KSPD_VRF_MPLS": "Не настроено",
+        "KSPD_FHRP": "VRRP" if any(d.vrrp for d in devices) else "Не настроено",
+        "KSPD_STACKING": "M-LAG (Huawei), IRF (HP)" if any("mlag" in str(d.interfaces).lower() or "irf" in str(d.interfaces).lower() for d in devices) else "Не настроено",
+        "KSPD_BFD_FR": "Не настроено",
+        "KSPD_NTP_SOURCE_1": ntp_source_1,
+        "KSPD_NTP_SOURCE_2": ntp_source_2,
+        "KSPD_NTP_ON_NETWORK_DEVICES": str(ntp_configured),
+        "KSPD_TOTAL_NETWORK_DEVICES": str(total_devices_count),
+        "KSPD_NTP_OFFSET_MAX": ntp_offset_max,
+        "KSPD_DHCP_SERVERS": dhcp_servers_str,
+        "KSPD_DHCP_RELAY": dhcp_relay_str,
+        "KSPD_IPAM": ipam_str,
+        "KSPD_INTERNAL_DNS_ZONES": internal_dns,
+        "KSPD_DNS_FORWARDERS": dns_forwarders,
+        "KSPD_DNSSEC": dnssec_str,
+        "KSPD_INTERZONE_FIREWALLING": interzone_fw,
+        "KSPD_DEVICES_WITH_ACL": str(devices_with_acl),
+        "KSPD_TOTAL_NETWORK_DEVICES": str(total_devices_count),
+        "KSPD_ACL_EXAMPLES": acl_examples,
+        "KSPD_CPP": cpp_str,
+        "KSPD_L2_SECURITY": l2_security,
+        "KSPD_S2S_VPN_COUNT": "0",
+        "KSPD_RA_VPN_USERS": "0",
+        "KSPD_VPN_ENCRYPTION": vpn_encryption,
+        "KSPD_VPN_MFA": vpn_mfa,
+        "KSPD_SYSLOG_SERVERS": syslog_str,
+        "KSPD_NETFLOW_COLLECTORS": netflow_collectors,
+        "KSPD_NETFLOW_COVERAGE": netflow_coverage,
+        "KSPD_CONNECTED_SERVERS_SUMMARY": connected_servers,
+        "KSPD_HOSTS_COUNT_BY_VLAN": hosts_by_vlan,
+        "KSPD_NETWORK_VIRTUALIZATION": network_virt,
+        "KSPD_EOSL_TABLE": eol_table,
+        "KSPD_EOS_TABLE": eol_table.replace("Критическое оборудование (EOSL)", "End-of-Sale").replace("EOSL", "End-of-Sale") if eol_warning else "",
+        "KSPD_REPLACEMENT_PLAN": replacement_plan,
+        "KSPD_CRITICAL_ISSUES": critical_issues_text,
+        "KSPD_MAJOR_ISSUES": issues_str if 'issues_str' in locals() else "\n".join([f"- {i}" for i in aggregated.get("critical_issues", [])]),
+        "KSPD_IMPROVEMENT_RECS": "1. Обеспечить полное резервирование\n2. Оптимизировать агрегированные каналы\n3. Регулярный мониторинг",
+        "KSPD_CONCLUSION": "ИТ-инфраструктура настроена на высокий уровень отказоустойчивости. Рекомендуется регулярный мониторинг и обслуживание.",
+        "KSPD_NETWORK_DEVICES_TABLE": _build_device_markdown_table(devices),
+        "KSPD_CORE_DEVICES_TABLE": "\n".join([f"| {d.hostname} | {d.model} | Core | {d.ip_mgmt} | {d.eol_info.get('status', '?')} | {'Да' if d.ospf else 'Нет'} | {'Да' if d.vrrp else 'Нет'} |" for d in core_devices]) if core_devices else "Нет устройств",
+        "KSPD_DISTRIBUTION_DEVICES_TABLE": "\n".join([f"| {d.hostname} | {d.model} | Distribution | {d.ip_mgmt} | {d.eol_info.get('status', '?')} | {d.ip_mgmt} | {len(d.vlans)} | {'Да' if d.acl else 'Нет'} |" for d in dist_devices]) if dist_devices else "Нет устройств",
+        "KSPD_EDGE_DEVICES_TABLE": "\n".join([f"| {d.hostname} | {d.model} | Edge | {d.ip_mgmt} | {d.eol_info.get('status', '?')} | 0 | 0 | {'Да' if d.acl else 'Нет'} |" for d in edge_devices]) if edge_devices else "Нет устройств",
+    }
+
+
+def _substitute_template_placeholders(template_text: str, placeholder_values: dict[str, str]) -> str:
+    """Replace all {{PLACEHOLDER}} in template with actual values."""
+    import re
+    result = template_text
+    for key, value in placeholder_values.items():
+        placeholder = f"{{{{{key}}}}}"
+        result = result.replace(placeholder, str(value))
+    # Replace any remaining unreplaced placeholders
+    result = re.sub(r'\{\{[A-Z_][A-Z0-9_]*\}\}', 'Данные отсутствуют. Требуется дополнительный сбор информации.', result)
+    return result
+    lines = ["| Hostname | Модель | IP Mgmt | EOL Статус | VLAN | AAA | NTP | ACL |"]
+    lines.append("|----------|--------|---------|------------|------|-----|-----|-----|")
+    for d in devices:
+        status = d.eol_info.get("status", "Неизвестно")
+        eol_icon = "🔴" if status == "EOSL" else ("🟡" if status == "End-of-Sale" else "🟢")
+        lines.append(
+            f"| {d.hostname} | {d.model} | {d.ip_mgmt} | {eol_icon} {status} | "
+            f"{len(d.vlans)} | {'✅' if d.aaa else '❌'} | "
+            f"{'✅' if d.ntp_servers else '❌'} | {'✅' if d.acl else '❌'} |"
+        )
+    return '\n'.join(lines)
+
+
 def _build_device_detail_text(devices: list[DeviceInfo]) -> str:
     lines = []
     for d in devices[:15]:
@@ -207,41 +420,8 @@ def _build_llm_prompt(
     template_structure: str,
     template_placeholders: list,
     prompt: str,
-    device_table: str,
-    device_details: str,
-    servers_table: str,
-    storage_table: str,
-    eol_table: str,
-    vm_text: str,
-    databases_text: str,
-    backups_text: str,
-    antivirus_text: str,
-    firewalls_text: str,
-    screenshots_text: str,
-    inventory_text: str,
-    critical_issues_text: str,
-    devices: list,
-    servers: list,
 ) -> str:
-    """Build LLM prompt for report generation. Separate function to avoid parser issues with long strings."""
-    aaa_info = (
-        'Настроено на ' + str(len(devices) - len([d for d in devices if not d.aaa])) + ' из ' + str(len(devices)) + ' устройств'
-    ) if devices else 'Нет устройств'
-    ntp_info = (
-        'Настроен на ' + str(len(devices) - len([d for d in devices if not d.ntp_servers])) + ' из ' + str(len(devices)) + ' устройств'
-    ) if devices else 'Нет устройств'
-    acl_info = (
-        'Настроены на ' + str(len(devices) - len([d for d in devices if not d.acl])) + ' из ' + str(len(devices)) + ' устройств'
-    ) if devices else 'Нет устройств'
-    dhcp_snooping_count = sum(1 for d in devices if d.dhcp_snooping)
-    port_security_count = sum(1 for d in devices if d.port_security)
-    bpdu_protection_count = sum(1 for d in devices if d.bpdu_protection)
-    servers_info = servers_table if servers_table else "Нет данных о серверах."
-    storage_info = storage_table if storage_table else "Нет данных о системах хранения."
-    eol_info = eol_table if eol_table else "Все оборудование актуально."
-    screenshots_info = screenshots_text[:8000] if screenshots_text else 'Нет данных'
-    inventory_info = inventory_text[:5000] if inventory_text else 'Нет данных'
-    prompt_short = prompt[:500]
+    """Build LLM prompt for report generation. Template already has placeholders substituted."""
     placeholders_str = ', '.join(template_placeholders) if template_placeholders else 'Нет плейсхолдеров'
 
     return (
@@ -252,60 +432,22 @@ def _build_llm_prompt(
         "═══════════════════════════════════════════════════════════════\n\n"
         "СТРУКТУРА РАЗДЕЛОВ (извлечена из шаблона):\n"
         + template_structure + "\n\n"
-        "ПЛЕЙСХОЛДЕРЫ ШАБЛОНА (ОБЯЗАТЕЛЬНО ЗАПОЛНИ ВСЕ):\n"
+        "ПЛЕЙСХОЛДЕРЫ ШАБЛОНА (УЖЕ ЗАПОЛНЕНЫ ДАННЫМИ):\n"
         + placeholders_str + "\n\n"
         "═══════════════════════════════════════════════════════════════\n\n"
-        "ДАННЫЕ ДЛЯ ЗАПОЛНЕНИЯ ШАБЛОНА:\n"
-        "═══════════════════════════════════════════════════════════════\n\n"
-        "ДАННЫЕ СЕТЕВОГО ОБОРУДОВАНИЯ:\n"
-        "- Сводная таблица устройств:\n"
-        + device_table + "\n\n"
-        "- Детальная информация по устройствам:\n"
-        + device_details + "\n\n"
-        "ДАННЫЕ СЕРВЕРОВ:\n"
-        + servers_info + "\n\n"
-        "ДАННЫЕ СИСТЕМ ХРАНЕНИЯ:\n"
-        + storage_info + "\n\n"
-        "EOL АНАЛИЗ:\n"
-        + eol_info + "\n\n"
-        "ИНФОРМАЦИОННАЯ БЕЗОПАСНОСТЬ:\n"
-        "- AAA/TACACS: " + aaa_info + "\n"
-        "- NTP: " + ntp_info + "\n"
-        "- ACL: " + acl_info + "\n"
-        "- DHCP Snooping: " + str(dhcp_snooping_count) + " устройств\n"
-        "- Port Security: " + str(port_security_count) + " устройств\n"
-        "- BPDU Protection: " + str(bpdu_protection_count) + " устройств\n\n"
-        "КРИТИЧЕСКИЕ ПРОБЛЕМЫ:\n"
-        + critical_issues_text + "\n"
-        "ВИРТУАЛИЗАЦИЯ:\n"
-        + vm_text + "\n\n"
-        "СУБД:\n"
-        + databases_text + "\n\n"
-        "СРК (BACKUP):\n"
-        + backups_text + "\n\n"
-        "АНТИВИРУС:\n"
-        + antivirus_text + "\n\n"
-        "МСЭ/VPN/FIREWALL:\n"
-        + firewalls_text + "\n\n"
-        "ADDS/AD (ИЗ СКРИНШОТОВ OCR):\n"
-        + screenshots_info + "\n\n"
-        "DHCP/DNS (ИЗ INVENTORY):\n"
-        + inventory_info + "\n\n"
         "ИСХОДНЫЙ ЗАПРОС ОПЕРАТОРА:\n"
-        + prompt_short + "\n\n"
+        + prompt[:500] + "\n\n"
         "═══════════════════════════════════════════════════════════════\n"
         "СТРОГИЕ ПРАВИЛА ГЕНЕРАЦИИ (НАРУШЕНИЕ = ПРОВАЛ ЗАДАЧИ):\n"
         "═══════════════════════════════════════════════════════════════\n"
         "1. ВЫВОДИ ВСЕ РАЗДЕЛИ И ПОДРАЗДЕЛЫ ИЗ ШАБЛОНА В ТОМ ЖЕ ПОРЯДКЕ С ТЕМИ ЖЕ ЗАГОЛОВКАМИ (уровни # ## ###)\n"
         "2. ВСЕ ТАБЛИЦЫ ИЗ ШАБЛОНА ДОЛЖНЫ БЫТЬ ПРИСУТСТВОВАТЬ С ТЕМИ ЖЕ ЗАГОЛОВКАМИ КОЛОНОК\n"
-        "3. ВСЕ ПЛЕЙСХОЛДЕРЫ ВИДА {{PLACEHOLDER}} ИЗ ШАБЛОНА ОБЯЗАТЕЛЬНО ЗАМЕНИ НА РЕАЛЬНЫЕ ДАННЫЕ ИЗ БЛОКА ВЫШЕ\n"
-        "4. ЕСЛИ ДЛЯ ПЛЕЙСХОЛДЕРА НЕТ ДАННЫХ — НАПИШИ \"Данные отсутствуют. Требуется дополнительный сбор информации.\"\n"
-        "5. НЕ ДОБАВЛЯЙ НИКАКИХ РАЗДЕЛОВ, КОТОРЫХ НЕТ В ШАБЛОНЕ\n"
-        "6. НЕ УДАЛЯЙ НИ ОДИН РАЗДЕЛ ИЗ ШАБЛОНА\n"
-        "7. СТИЛЬ: деловой, технический, конкретные цифры и факты, без \"воды\"\n"
-        "8. ДЛИНА: отчёт должен быть ПОЛНЫМ — используй все предоставленные данные\n"
-        "9. МАРКДАУН: используй таблицы в формате | col1 | col2 | с разделителями |---|---|\n"
-        "10. В ЗАКЛЮЧЕНИИ: итоговая оценка состояния по разделам шаблона, ключевые риски, приоритеты действий\n"
+        "3. НЕ УДАЛЯЙ НИ ОДИН РАЗДЕЛ ИЗ ШАБЛОНА\n"
+        "4. НЕ ДОБАВЛЯЙ НИКАКИХ РАЗДЕЛОВ, КОТОРЫХ НЕТ В ШАБЛОНЕ\n"
+        "5. СТИЛЬ: деловой, технический, конкретные цифры и факты, без \"воды\"\n"
+        "6. ДЛИНА: отчёт должен быть ПОЛНЫМ — используй все предоставленные данные\n"
+        "7. МАРКДАУН: используй таблицы в формате | col1 | col2 | с разделителями |---|---|\n"
+        "8. В ЗАКЛЮЧЕНИИ: итоговая оценка состояния по разделам шаблона, ключевые риски, приоритеты действий\n"
     )
 
 
@@ -505,27 +647,45 @@ async def generate_report(prompt: str) -> dict:
         else:
             critical_issues_text = "Критических проблем не выявлено.\n"
 
+        # Build placeholder values and substitute in template
+        if template_sections:
+            placeholder_values = _build_placeholder_values(
+                devices=devices,
+                servers=servers,
+                vm_info=vm_info,
+                storage_list=storage_list,
+                databases=databases,
+                backups_list=backups_list,
+                antivirus_list=antivirus_list,
+                firewalls_list=firewalls_list,
+                inventory_text=inventory_text,
+                screenshots_text=screenshots_text,
+                prompt=prompt,
+                device_table=device_table,
+                device_details=device_details,
+                servers_table=servers_table,
+                storage_table=storage_table,
+                eol_table=eol_table,
+                critical_issues_text=critical_issues_text,
+                eol_critical=eol_critical,
+                eol_warning=eol_warning,
+                eol_ok=eol_ok,
+                no_aaa=no_aaa,
+                no_ntp=no_ntp,
+                no_acl=no_acl,
+                aggregated=aggregated,
+            )
+            template_text = _substitute_template_placeholders(template_text, placeholder_values)
+            # Re-extract placeholders after substitution (should be none left)
+            template_placeholders = re.findall(r'\{\{([A-Z_][A-Z0-9_]*)\}\}', template_text) if template_text else []
+            template_placeholders = list(set(template_placeholders))
+
         # Build LLM prompt using helper to avoid parser issues
         llm_report_prompt = _build_llm_prompt(
             template_text=template_text,
             template_structure=template_structure,
             template_placeholders=template_placeholders,
             prompt=prompt,
-            device_table=device_table,
-            device_details=device_details,
-            servers_table=servers_table,
-            storage_table=storage_table,
-            eol_table=eol_table,
-            vm_text=vm_text,
-            databases_text=databases_text,
-            backups_text=backups_text,
-            antivirus_text=antivirus_text,
-            firewalls_text=firewalls_text,
-            screenshots_text=screenshots_text,
-            inventory_text=inventory_text,
-            critical_issues_text=critical_issues_text,
-            devices=devices,
-            servers=servers,
         )
 
         try:

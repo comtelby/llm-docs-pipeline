@@ -1,0 +1,1 @@
+IqDataBot v1.1: Fix database schema auto-initialization, strict template adherence, all exports working

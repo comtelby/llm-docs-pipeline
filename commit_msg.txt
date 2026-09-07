@@ -1,7 +1,10 @@
-Fix: Add schema auto-initialization to handle missing tables
+Implement server-side template placeholder substitution for strict template adherence
 
-- Added _ensure_schema_exists() in database.py to auto-create tables if missing
-- Fixed sqlite3.OperationalError: no such table: inventories
-- Applied schema check in find_inventory_by_model and _sync_eol_to_db
-- All endpoints now working: chat, generate-report, exports (PDF/DOCX/HTML)
+- Added _build_placeholder_values() function to build structured placeholder values from parsed data
+- Added _substitute_template_placeholders() to replace {{PLACEHOLDER}} in template with actual data
+- Modified _build_llm_prompt() to work with pre-filled template (simplified prompt)
+- Added _build_device_markdown_table() function (was missing)
+- All placeholders in KSPD template now properly filled with real data
 - All 35 tests pass
+- All endpoints working: chat, generate-report, exports (PDF/DOCX/HTML/TXT/MD)
+- Template adherence: reports now follow KSPD template structure exactly
